@@ -41,7 +41,7 @@ export function buildApp({ links, now = () => new Date() }: AppDeps): FastifyIns
     }
   });
 
-  app.get("/",async (_request, reply) => plainPage(reply, 200, "Linkling"));
+  app.get("/", async (_request, reply) => plainPage(reply, 200, "Linkling"));
 
   app.get<{ Params: { name: string } }>("/:name", async (request, reply) => {
     const name = normalizeName(request.params.name);
