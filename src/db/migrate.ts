@@ -55,7 +55,8 @@ export function migrate(db: Database, dir: string = MIGRATIONS_DIR): number[] {
   const applied: number[] = [];
   for (const m of migrations) {
     // IMMEDIATE takes the write lock before reading the version, so a second process
-    // starting at the same moment waits and then sees this migration as already done.
+    // starting at the same moment waits (up to better-sqlite3's 5s busy timeout) and
+    // then sees this migration as already done.
     db.transaction(() => {
       const current = userVersion(db);
       checkVersion(current);

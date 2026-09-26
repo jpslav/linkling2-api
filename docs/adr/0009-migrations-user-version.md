@@ -29,12 +29,16 @@ Alternatives considered:
 - Migrations are SQL files in `migrations/`, named `NNNN_<what>.sql` and numbered from
   `0001` with no gap or repeat. They are forward-only; there are no down files.
 - `src/db/migrate.ts` applies, in number order, every file above the database's
-  `user_version`. Each file runs in one transaction together with setting `user_version`
-  to its number, so a failed migration leaves the database at the version before it.
+  `user_version`. Each file runs in one `BEGIN IMMEDIATE` transaction together with
+  setting `user_version` to its number, so a failed migration leaves the database at the
+  version before it. The version is re-read inside that transaction, so two processes
+  starting at once do not both apply the same file.
+- A `.sql` file in `migrations/` whose name starts with a digit but does not match
+  `NNNN_<what>.sql` is refused rather than skipped.
 - Opening the database (`src/db/open.ts`) runs this every time. Running it on an
   up-to-date database applies nothing.
 - A database whose `user_version` is higher than the highest file present is refused, not
-  touched: it was written by newer code.
+  touched: it was written by newer code. A negative `user_version` is refused too.
 
 ## Consequences
 

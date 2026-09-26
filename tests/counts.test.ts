@@ -30,8 +30,8 @@ test("a follow just after midnight UTC counts toward the new day", () => {
   ]);
 });
 
-// CI runs in UTC, where a local-date bug would pass; this runs the day boundary in a
-// zone where the local date and the UTC date differ.
+// On a machine set to UTC a local-date bug would pass the test above; this runs the day boundary in a zone where the local date and
+// the UTC date differ.
 test("the day is the UTC date whatever the machine's time zone", () => {
   const saved = process.env.TZ;
   process.env.TZ = "Pacific/Kiritimati"; // UTC+14

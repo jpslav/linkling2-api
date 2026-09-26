@@ -8,9 +8,10 @@ const WAL_RETRY_MS = 100;
 /**
  * Switching a new file to WAL needs a lock SQLite's busy timeout does not wait for,
  * so a second process opening the same fresh file at the same moment gets
- * SQLITE_BUSY at once. Retry until five seconds have passed, then give up. The
- * window is time, not a count of attempts, because an attempt can itself wait out
- * the busy timeout when another connection holds an exclusive lock.
+ * SQLITE_BUSY at once. Retries stop once five seconds have passed. The window is
+ * time, not a count of attempts, because one attempt can itself wait out
+ * better-sqlite3's 5s busy timeout when another connection holds an exclusive lock,
+ * so the worst case before giving up is about ten seconds.
  */
 function enableWal(db: Database): void {
   const deadline = Date.now() + WAL_RETRY_WINDOW_MS;
