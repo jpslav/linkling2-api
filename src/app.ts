@@ -60,8 +60,9 @@ export function buildApp({ links, key, now = () => new Date() }: AppDeps): Fasti
 
   // The guard decides by the route that matched, never by the text of the URL: Fastify
   // routes `/%2D/api/links` to `/-/api/links`, so a prefix test on request.url would let
-  // it through. Added before any route, it covers every route and plugin added later. A
-  // request that matched no route gets the plain 404; there is nothing there to guard.
+  // it through. A hook on the root instance, it covers every route on it and in its plugins,
+  // including those added after buildApp returns (tests/team-key.test.ts). A request that
+  // matched no route gets the plain 404; there is nothing there to guard.
   app.addHook("onRequest", async (request, reply) => {
     const route = request.routeOptions.url;
     if (route === undefined || !route.startsWith("/-/") || OPEN.has(route)) return;

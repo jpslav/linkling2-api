@@ -21,8 +21,9 @@ export function keyFromAuthorization(header: string | undefined): string | null 
 
 /**
  * Why a key cannot be used, or null when it can. A key must be printable ASCII with no
- * spaces: Node trims header values and reads them as latin1, so a trailing newline or a
- * non-ASCII character would make a key that works as the Basic password but never as Bearer.
+ * spaces. Node trims the ends of header values, and a space at either end of a Bearer key
+ * is lost, so such a key works as the Basic password but never as Bearer. Node also reads
+ * header bytes as latin1, so a non-ASCII key sent as UTF-8 (as curl sends it) never matches.
  */
 export function keyProblem(key: string | undefined): string | null {
   if (key === undefined || key === "") return "is not set";
