@@ -91,6 +91,13 @@ export async function startService(env: NodeJS.ProcessEnv, stderr: (line: string
           throw new Error(`linkling: could not open the database in ${dataDir}: ${(err as Error).message}`);
         }
         links = new SqliteLinks(db);
+        // Once at start, so a file written before this version (or before a migration)
+        // keeps no order of writes either (ADR-0014).
+        try {
+          links.compact();
+        } catch {
+          stderr("linkling: rebuilding the database at start failed");
+        }
         return links;
       },
       listen: { port, host: "0.0.0.0" },

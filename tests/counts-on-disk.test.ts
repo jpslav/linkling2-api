@@ -6,7 +6,9 @@ import { connect, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { afterEach, describe, expect, test } from "vitest";
+import { openDatabase } from "../src/db/open.js";
 import { CLOSE_WAIT_MS, msUntilFlush, startService, type Running } from "../src/server.js";
+import { SqliteLinks } from "../src/store.js";
 import { apiCall, appWith, countRows, seed, tempLinks } from "./support/app.js";
 import { bearer, TEST_KEY } from "./support/team-key.js";
 import { tempDir } from "./temp-db.js";
@@ -122,6 +124,32 @@ describe("ADR-0014 counts on disk", () => {
     expect(countRows(links)).toEqual([{ link_id: link.id, day: "2026-09-26", count: 1 }]);
   });
 
+  // Where a row sits in its page follows the order rows were written in. Without the rebuild
+  // after each write, a file written before and after a restart differs from one written in
+  // one go, and says which link was first followed before the restart.
+  test("the same counts leave the same file, however many writes they came in", () => {
+    const at = new Date("2026-09-26T09:00:00Z");
+    const fileAfter = (writes: string[][]): Buffer => {
+      const dbPath = join(tempDir(), "linkling.db");
+      const db = openDatabase(dbPath);
+      const links = new SqliteLinks(db);
+      const ids = new Map(["one", "two", "three"].map((name) => [name, links.tryCreate({ name, target: `https://example.com/${name}`, madeBy: "sam", expiresAt: null }, at)!.id]));
+      for (const write of writes) {
+        for (const name of write) links.countFollow(ids.get(name)!, at);
+        links.flushCounts();
+      }
+      db.close();
+      return readFileSync(dbPath);
+    };
+    // Two writes each, as two scheduled writes (a stop, then a midnight) always are; only which
+    // follows fell before the first one differs.
+    const inOne = fileAfter([["one", "two", "three"], []]);
+    const inTwo = fileAfter([["two"], ["one", "three"]]);
+    // Blind arm: the files hold the counts at all.
+    expect(inOne.length).toBeGreaterThan(0);
+    expect(inTwo.equals(inOne), "a file written in two goes differs from one written in one").toBe(true);
+  });
+
   test("the write is scheduled five seconds after each UTC midnight", () => {
     expect(msUntilFlush(new Date("2026-09-26T23:59:59Z"))).toBe(6_000);
     expect(msUntilFlush(new Date("2026-09-26T12:00:00Z"))).toBe(12 * 3_600_000 + 5_000);
@@ -173,18 +201,30 @@ describe("the running service writes the day's follows when it stops", () => {
     const stalled = connect(port, "127.0.0.1");
     await new Promise((open) => stalled.once("connect", open));
     stalled.write("GET /kept HTTP/1.1\r\nHost: x\r\n");
+    // Let the server read those bytes, so the connection is busy rather than idle and the
+    // stop really has to wait for it.
+    await sleep(200);
+    const onDiskNow = (): unknown => {
+      const db = new BetterSqlite3(join(data, "linkling.db"), { readonly: true });
+      try {
+        return db.prepare("SELECT sum(count) AS n FROM daily_counts").get();
+      } finally {
+        db.close();
+      }
+    };
     try {
       const started = Date.now();
-      await running.close();
-      expect(Date.now() - started).toBeLessThan(CLOSE_WAIT_MS + 1_000);
+      const closing = running.close();
+      // Mid-wait, which is when Docker's SIGKILL could land: the counts are already written.
+      await sleep(1_000);
+      expect(onDiskNow()).toEqual({ n: 3 });
+      await closing;
+      const took = Date.now() - started;
+      expect(took, "the stop did not wait for the busy connection").toBeGreaterThanOrEqual(CLOSE_WAIT_MS - 50);
+      expect(took).toBeLessThan(CLOSE_WAIT_MS + 1_000);
     } finally {
       stalled.destroy();
     }
-    const db = new BetterSqlite3(join(data, "linkling.db"));
-    try {
-      expect(db.prepare("SELECT sum(count) AS n FROM daily_counts").get()).toEqual({ n: 3 });
-    } finally {
-      db.close();
-    }
+    expect(onDiskNow()).toEqual({ n: 3 });
   }, 10_000);
 });

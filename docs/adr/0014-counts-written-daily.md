@@ -41,6 +41,15 @@ written to disk?" in `products/linkling/DECISIONS.md`. This ADR is how the servi
     when another connection keeps it from emptying the WAL, as in ADR-0012.
   - The files' modification times then say "a daily write, or a shutdown", never when
     anyone clicked.
+- **Every write ends by rebuilding the file** (`SqliteLinks.compact`: `VACUUM`, with
+  `temp_store = MEMORY` so the scratch copy never touches the disk, then the truncating
+  checkpoint). The service also rebuilds once at start, which normalizes a file from before
+  this version or a migration. Where SQLite places a row inside a page, and which pages it
+  frees, follow the order rows were written in. Without the rebuild, a file written before
+  and after a restart differs from one written in one go.
+  - A rebuild bumps the schema counter in the file header. So each scheduled write
+    rebuilds whether or not there was anything to write, and the counter follows the
+    schedule (starts, midnights, stops) rather than the clicks.
 - **`daily_counts` keeps no rowid.** Migration `0002_daily_counts_without_rowid.sql`
   rebuilds it `WITHOUT ROWID`, keeping its rows. A rowid is handed out in insertion order.
   It would last in the file and record which link was first counted before which, and,
@@ -68,7 +77,9 @@ written to disk?" in `products/linkling/DECISIONS.md`. This ADR is how the servi
 - That write lands in one go and leaves the WAL empty.
 - It survives a failure, and says so when the WAL stays.
 - The midnight write leaves the new day alone.
-- A stop writes the counts even with a stalled request open.
+- The same counts written in one go or in two leave byte-identical files.
+- A stop writes the counts before it waits, then waits the full three seconds for a
+  request whose headers never finish, and no longer.
 
 Switching back to one write per click turns three of its tests red. `tests/db.test.ts`
 pins the missing rowid and the migration.

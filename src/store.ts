@@ -87,7 +87,12 @@ export class SqliteLinks implements LinkStore {
     for (const [id, days] of this.pending) {
       for (const [day, count] of days) if (before === undefined || day < before) rows.push([id, day, count]);
     }
-    if (rows.length === 0) return 0;
+    // Even with nothing to write, the file is rebuilt: each rebuild bumps SQLite's schema
+    // counter in the file header, which would otherwise count the writes that had follows.
+    if (rows.length === 0) {
+      this.compact();
+      return 0;
+    }
     rows.sort(([a, x], [b, y]) => a - b || (x < y ? -1 : x > y ? 1 : 0));
     const add = this.db.prepare(
       `INSERT INTO daily_counts (link_id, day, count) VALUES (?, ?, ?)
@@ -103,8 +108,21 @@ export class SqliteLinks implements LinkStore {
       days.delete(day);
       if (days.size === 0) this.pending.delete(id);
     }
-    truncateWal(this.db, "the day's counts were written, but another connection kept the WAL from being truncated (ADR-0014)");
+    this.compact();
     return written;
+  }
+
+  /**
+   * Rebuilds the whole file in key order and empties the WAL (ADR-0014). Where SQLite puts
+   * a row inside a page, and which pages it frees, follow the order rows were written in, so
+   * a file written in two goes (before and after a restart, say) differs from one written
+   * in one; after this it does not. The rebuild's scratch copy is kept in memory, not in a
+   * temporary file. Throws when another connection keeps it from finishing.
+   */
+  compact(): void {
+    this.db.pragma("temp_store = MEMORY");
+    this.db.exec("VACUUM");
+    truncateWal(this.db, "the database was rebuilt, but another connection kept the WAL from being truncated (ADR-0014)");
   }
 
   tryCreate(link: NewLink, now: Date): StoredLink | null {
@@ -133,8 +151,7 @@ export class SqliteLinks implements LinkStore {
     } finally {
       // Read back rather than trusted: setTarget throws after the edit when the WAL could
       // not be truncated, and the redirect must follow the edit either way.
-      const now = getLinkByName(this.db, name);
-      if (now !== undefined) this.byName.set(name, asLink(now));
+      this.resync(name);
     }
   }
 
@@ -146,9 +163,23 @@ export class SqliteLinks implements LinkStore {
     try {
       return deleteLink(this.db, name);
     } catch (err) {
-      const still = getLinkByName(this.db, name);
-      if (still !== undefined) this.byName.set(name, asLink(still));
+      this.resync(name);
       throw err;
+    }
+  }
+
+  /**
+   * Makes the redirect's copy of one link match the database. When the database cannot even
+   * be read, the copy is left as it is, and the error the caller is handling stays the one
+   * that is thrown.
+   */
+  private resync(name: string): void {
+    try {
+      const link = getLinkByName(this.db, name);
+      if (link === undefined) this.byName.delete(name);
+      else this.byName.set(name, asLink(link));
+    } catch {
+      // The write's own error is the one worth reporting.
     }
   }
 
