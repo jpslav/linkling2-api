@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-// The `linkling` command: everything the team API does (ADR-0013), from a terminal. It is
-// this package's `bin`, installed with `npm install -g` (ADR-0007, ADR-0016).
+// The `linkling` command: make, list, edit, delete and count links through the team API
+// (ADR-0013), from a terminal. It is this package's `bin`, installed with `npm install -g`
+// (ADR-0007, ADR-0016).
 //
 // It imports only `node:` modules and `keyProblem`, which itself imports only `node:crypto`,
-// so starting it never loads Fastify or better-sqlite3 (tests/cli-bin.test.ts walks the imports).
-// It checks nothing the service already checks: a name, an expiry and a URL go to the API as
-// given, and the API's own sentence is what the user reads.
+// so starting it never loads Fastify or better-sqlite3 (tests/cli.test.ts, "loads only node:
+// modules", walks the imports).
+// It does not validate a name, an expiry or a URL: they go to the API as given, and the API's own
+// sentence is what the user reads. What it checks is its own environment and arguments.
 import { userInfo } from "node:os";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import { keyProblem } from "./team-key.js";
@@ -21,7 +23,7 @@ export const EXIT = {
   key: 3,
   /** No usable answer: unreachable, silent, a redirect, a 5xx, or not Linkling's API. */
   noAnswer: 4,
-  /** A bug in this command, not in anything it was asked to do. */
+  /** A bug in this command, or output it cannot write: never anything the service said or did. */
   bug: 70,
 } as const;
 
@@ -61,7 +63,7 @@ const USAGE = `usage: linkling <command> [options]
   counts <name>         shows a link's followed count for each UTC day
 
   --expires takes a date such as 2026-12-31 (to the end of that UTC day) or a lifetime such as
-  7d, 36h, 90m or 30s. Without --by, a link is made by $USER.
+  7d, 36h, 90m or 30s. Without --by, a link is made by $USER, or by your login name when that is not set.
   --json, on any command, prints the service's answer as one line of JSON.
 
 environment:
@@ -69,7 +71,7 @@ environment:
   LINKLING_KEY    the team key
 
 exit codes: 0 done, 1 the service said no, 2 wrong command line or environment,
-3 the key was refused, 4 no usable answer, 70 a bug in linkling itself
+3 the key was refused, 4 no usable answer, 70 a bug in linkling itself or output it cannot write
 `;
 
 /** What each command takes: its positional arguments, in order, and its string options. */
@@ -120,7 +122,7 @@ function madeBy(io: CliIo, by: string | undefined): string {
     const login = (io.login ?? (() => userInfo().username))();
     if (login.trim() !== "") return login;
   } catch {
-    // A user id with no entry in the system's user database: the same as no name.
+    // os.userInfo() throws "if a user has no username or homedir" (nodejs.org/api/os.html): no name.
   }
   throw usageError("cannot tell who you are (USER is not set and the system has no login name for you); pass --by <name>");
 }
@@ -180,7 +182,7 @@ async function call(s: Settings, method: string, path: string, expect: 200 | 201
   try {
     const res = await s.fetch(`${s.base}${path}`, {
       method,
-      // A redirect is reported, never followed: following one would replay a POST as a GET.
+      // A redirect is reported, never followed: fetch answers a POST's 301 or 302 with a GET.
       redirect: "manual",
       signal: AbortSignal.timeout(s.timeoutMs),
       headers: {
@@ -219,10 +221,11 @@ async function call(s: Settings, method: string, path: string, expect: 200 | 201
   throw new Failure(status >= 400 && status < 500 ? EXIT.refused : EXIT.noAnswer, `${said} (${status})`);
 }
 
-// East Asian Wide and Fullwidth characters and emoji shown as pictures take two terminal columns;
-// combining marks and format characters such as the zero-width joiner take none. A made-by name
-// can hold any of them (ADR-0013), and a cell's length in characters is not its width on screen.
-const WIDE = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹯＀-｠￠-￦\u{20000}-\u{3fffd}]|\p{Emoji_Presentation}/u;
+// Roughly how many terminal columns a cell takes: East Asian wide and fullwidth characters (the
+// Hangul, CJK and fullwidth ranges below) and emoji shown as pictures take two, and combining
+// marks and format characters such as the zero-width joiner take none. A made-by name can hold
+// any of them (ADR-0013), and a cell's length in characters is not its width on screen.
+const WIDE = /[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6\u{20000}-\u{3fffd}]|\p{Emoji_Presentation}/u;
 const NO_WIDTH = /[\p{M}\p{Cf}]/u;
 const columns = (text: string): number =>
   [...text].reduce((sum, char) => sum + (NO_WIDTH.test(char) ? 0 : WIDE.test(char) ? 2 : 1), 0);
@@ -235,7 +238,7 @@ function table(rows: string[][]): string {
   return rows.map((row) => `${line(row)}\n`).join("");
 }
 
-/** Never for a link that has no expiry (R-006); `expired` in front of a time that has passed. */
+/** `never` for a link with no expiry (R-006), and `expired` in front of a time that has passed. */
 const expiryText = (link: LinkJson): string =>
   link.expires_at === null ? "never" : link.expired ? `expired ${link.expires_at}` : link.expires_at;
 
@@ -338,20 +341,26 @@ async function run(argv: readonly string[], io: CliIo): Promise<number> {
   }
 }
 
-/** Runs the command and returns its exit code; nothing here exits the process or throws. */
+/**
+ * Runs the command and returns its exit code. It does not exit the process and does not throw: a
+ * refusal is a code, a bug is 70, and a line it cannot write to stderr is left unsaid.
+ */
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
+  const say = (line: string): void => {
+    try {
+      io.stderr(line);
+    } catch {
+      // Whatever broke is the output itself; there is nothing left to say it on.
+    }
+  };
   try {
     return await run(argv, io);
   } catch (err) {
     if (err instanceof Failure) {
-      io.stderr(`linkling: ${err.message}\n`);
+      say(`linkling: ${err.message}\n`);
       return err.code;
     }
-    try {
-      io.stderr(`linkling: internal error: ${err instanceof Error ? err.message : String(err)}\n`);
-    } catch {
-      // Whatever broke is the output itself; there is nothing left to say it on.
-    }
+    say(`linkling: internal error: ${err instanceof Error ? err.message : String(err)}\n`);
     return EXIT.bug;
   }
 }

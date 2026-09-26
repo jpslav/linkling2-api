@@ -7,7 +7,8 @@
 # `linkling` must be on PATH: `npm ci && npm run build && npm install -g .`. The script runs
 # R-015's verify line exactly as products/linkling/REQUIREMENTS.md gives it, then checks what
 # that line does not: made_by, expiry, the exit codes for a taken name, a link that is not
-# there and a wrong key, and a follow showing up in `linkling counts`. It makes links under
+# there, a wrong key and an address that gets no answer, and a follow showing up in
+# `linkling counts`. It makes links under
 # names of its own and deletes them on the way out. The one name it cannot choose is
 # `cli-test`, which R-015's line fixes: on a stack that already has a link by that name it stops
 # with CLI E2E BLIND before making anything, and it never deletes one it did not make.
@@ -95,7 +96,7 @@ case "$week_row" in "") fail "the link made with --expires 7d is not listed" ;; 
 expect_exit 1 "making a taken name" linkling make https://example.com/e2e --name "$plain"
 expect_exit 1 "deleting a link that is not there" linkling delete "e2e-no-such-link-$suffix"
 LINKLING_KEY="wrong-$suffix" expect_exit 3 "listing with a wrong key" linkling list
-LINKLING_BASE="http://127.0.0.1:1" expect_exit 4 "listing from a service that is not there" linkling list
+LINKLING_BASE="http://127.0.0.1:1" expect_exit 4 "listing from an address that gets no answer" linkling list
 
 # 5. R-009's CLI half: a follow shows up in linkling counts.
 curl -s -o /dev/null "$LINKLING_BASE/$plain"

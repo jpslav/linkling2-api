@@ -1,6 +1,7 @@
 // The `linkling` command (R-015, ADR-0016), run in-process against the real app. What each
 // command prints, what each way of failing exits with, and that a service that is not there,
-// or not Linkling's, is a failure and never a pass. R-008's half is in tests/made-by.test.ts.
+// or not Linkling's, is a failure and not a pass (bar a 204 to a delete, which carries nothing to
+// check). R-008's half is in tests/made-by.test.ts.
 import { readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -13,7 +14,7 @@ import { bearer, TEST_KEY } from "./support/team-key.js";
 
 const NOW = () => MADE;
 
-/** A `fetch` that fails the test if the command makes a request at all. */
+/** A `fetch` that records any request the command makes and refuses it; tests assert `calls` stays empty. */
 function noRequests() {
   const calls: string[] = [];
   const fetchDouble = (async (input: unknown) => {
@@ -411,7 +412,13 @@ describe("no usable answer: exit 4, never 0", () => {
     });
   });
 
-  test("some other web server is exit 4 whatever it answers, so a wrong LINKLING_BASE is never a pass or a crash", async () => {
+  test("the one answer with nothing in it to check: a 204 to a delete is taken as done, by whoever sends it", async () => {
+    const base = await otherServer(204, {}, "");
+    const { run } = await stack();
+    expect(await run(["delete", "x"], { LINKLING_BASE: base })).toEqual({ code: 0, out: "deleted x\n", err: "" });
+  });
+
+  test("some other web server is exit 4 for each of these answers to each command, so a wrong LINKLING_BASE is not a pass or a crash", async () => {
     const { run } = await stack();
     const html = { "content-type": "text/html" };
     const json = { "content-type": "application/json" };
@@ -471,6 +478,16 @@ describe("the stats page's own instructions (LL-008) are true of this command", 
 });
 
 describe("the command itself", () => {
+  test("a stderr that cannot be written to does not turn a refusal into a throw", async () => {
+    const broken = {
+      stderr: () => {
+        throw new Error("stderr is broken");
+      },
+    };
+    expect(await linkling(["frobnicate"], {}, broken)).toEqual({ code: EXIT.usage, out: "", err: "" });
+    expect((await linkling(["list"], { LINKLING_BASE: "http://127.0.0.1:1", LINKLING_KEY: TEST_KEY }, broken)).code).toBe(EXIT.noAnswer);
+  });
+
   test("a bug is exit 70, which no other failure uses", async () => {
     const ran = await linkling(["help"], {}, {
       stdout: () => {

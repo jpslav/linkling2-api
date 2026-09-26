@@ -85,8 +85,9 @@ curl -s -X POST http://localhost:8080/-/api/links \
 
 ## The `linkling` command
 
-Everything the API does, from a terminal, with only Node and the team key. It is this
-package's `bin`, so it is built and installed from here (ADR-0007, [ADR-0016](docs/adr/0016-linkling-command.md)):
+Make, list, edit, delete and count links from a terminal, with only Node and the team key.
+It is this package's `bin`, so it is built and installed from here (ADR-0007,
+[ADR-0016](docs/adr/0016-linkling-command.md)):
 
 ```bash
 npm ci && npm run build && npm install -g .    # npm links this folder: keep it, and dist/, in place
@@ -95,8 +96,8 @@ export LINKLING_KEY=choose-a-team-key          # the team key
 linkling make https://example.com/plan --name q3-plan --expires 7d
 ```
 
-After a `git pull`, `npm run build` is all the installed command needs. `npm uninstall -g
-linkling-api` removes it.
+After a `git pull`, `npm run build` refreshes the installed command (run `npm ci` first if
+`package-lock.json` changed). `npm uninstall -g linkling-api` removes it.
 
 | Command | Does | Prints |
 |---|---|---|
@@ -118,8 +119,9 @@ linkling-api` removes it.
 **In scripts**, use the exit code and `--json`; the human output above can change. `--json`,
 on any command, prints the service's answer as one line of JSON, unchanged
 ([ADR-0013](docs/adr/0013-team-api.md)'s link, `{"links": [...]}` or `{"name", "total", "days"}`);
-for `delete` it prints `{"name": "<name>", "deleted": true}`. Errors are one line on stderr
-beginning `linkling: `, and stdout carries only results.
+for `delete` it prints `{"name": "<name>", "deleted": true}`. An error goes to stderr, its
+first line beginning `linkling: ` (a wrong command line adds the usage after it), and stdout
+carries only results.
 
 | Exit | Means |
 |---|---|
@@ -127,8 +129,8 @@ beginning `linkling: `, and stdout carries only results.
 | 1 | the service said no: a taken name (409), no such link (404), a value it refuses (400) |
 | 2 | the command line or `LINKLING_BASE`/`LINKLING_KEY` is wrong; nothing was sent |
 | 3 | the team key was refused (401) |
-| 4 | no usable answer: the service is not there or is silent for 10 s, redirects, fails (5xx), or is not Linkling's API |
-| 70 | a bug in the command itself |
+| 4 | no usable answer: the service is not there or is silent for 10 s, redirects, fails (5xx), or is not Linkling's API (a `204` to a `delete` is taken as done, whoever sends it) |
+| 70 | a bug in the command itself, or output it cannot write |
 
 ```bash
 short=$(linkling make https://example.com/plan --name q3-plan) || exit
@@ -146,6 +148,7 @@ LINKLING_BASE=http://localhost:8080 LINKLING_KEY=... scripts/cli-e2e.sh   # R-01
 
 `scripts/cli-e2e.sh` prints `CLI E2E PASS` (exit 0) or `CLI E2E FAIL: <step>` (exit 1), and
 `CLI E2E BLIND: <what was missing>` (exit 2) when there is no `linkling`, no key or address,
-or no service to try it on.
+no service to try it on, a key the service refuses, or a link called `cli-test` already there
+(R-015's line makes that name).
 
 Decisions are in [docs/adr/](docs/adr/README.md).
