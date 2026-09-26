@@ -67,6 +67,17 @@ test("R-007: deleting a followed link stops it at once, keeps its counts, and a 
   expect((await apiCall(app, "GET", "/-/api/links/q3-plan/counts")).json()).toEqual({ name: "q3-plan", total: 0, days: [] });
 });
 
+test("a delete the database refuses leaves the link working, as the database still has it", async () => {
+  const links = tempLinks();
+  seed(links, "q3-plan", "https://example.com/q3");
+  links.db.exec("CREATE TRIGGER refuse BEFORE DELETE ON links BEGIN SELECT RAISE(ABORT, 'disk full'); END");
+  const app = appWith(links);
+  expect((await apiCall(app, "DELETE", "/-/api/links/q3-plan")).statusCode).toBe(500);
+  const follow = await app.inject({ method: "GET", url: "/q3-plan" });
+  expect([follow.statusCode, follow.headers.location]).toEqual([302, "https://example.com/q3"]);
+  expect(app.logged).toEqual([]);
+});
+
 test("deleting an unknown name through the API is a 404", async () => {
   const res = await apiCall(appWith(), "DELETE", "/-/api/links/nope");
   expect([res.statusCode, typeof res.json().error]).toEqual([404, "string"]);

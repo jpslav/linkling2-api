@@ -15,6 +15,7 @@ import {
   listDailyCounts,
   listLinks,
   setTarget,
+  truncateWal,
   utcDay,
   type DailyCount,
   type Link as StoredLink,
@@ -72,27 +73,37 @@ export class SqliteLinks implements LinkStore {
   }
 
   /**
-   * Writes every tallied follow in one transaction, then truncates the WAL so the file
-   * keeps no copy of the counts as they were (ADR-0014). Returns how many follows it wrote;
-   * on a failure nothing is written, the tallies are kept for the next flush, and it throws.
+   * Writes the tallied follows in one transaction, in (link, day) order rather than the
+   * order anyone clicked, then truncates the WAL so the file keeps no copy of the counts as
+   * they were (ADR-0014). With `before` (a `YYYY-MM-DD` day), only earlier days are written:
+   * the midnight write leaves the new day's first seconds in memory, so nothing on disk
+   * shows who clicked just after midnight. Returns how many follows it wrote.
+   *
+   * If the transaction fails, nothing is written, the tallies are kept, and it throws. If
+   * the write commits but the WAL cannot be truncated, it throws after the write.
    */
-  flushCounts(): number {
-    if (this.pending.size === 0) return 0;
+  flushCounts(before?: string): number {
+    const rows: [number, string, number][] = [];
+    for (const [id, days] of this.pending) {
+      for (const [day, count] of days) if (before === undefined || day < before) rows.push([id, day, count]);
+    }
+    if (rows.length === 0) return 0;
+    rows.sort(([a, x], [b, y]) => a - b || (x < y ? -1 : x > y ? 1 : 0));
     const add = this.db.prepare(
       `INSERT INTO daily_counts (link_id, day, count) VALUES (?, ?, ?)
        ON CONFLICT (link_id, day) DO UPDATE SET count = count + excluded.count`,
     );
-    let written = 0;
     this.db.transaction(() => {
-      for (const [id, days] of this.pending) {
-        for (const [day, count] of days) {
-          add.run(id, day, count);
-          written += count;
-        }
-      }
+      for (const row of rows) add.run(...row);
     })();
-    this.pending.clear();
-    this.db.pragma("wal_checkpoint(TRUNCATE)");
+    let written = 0;
+    for (const [id, day, count] of rows) {
+      written += count;
+      const days = this.pending.get(id)!;
+      days.delete(day);
+      if (days.size === 0) this.pending.delete(id);
+    }
+    truncateWal(this.db, "the day's counts were written, but another connection kept the WAL from being truncated (ADR-0014)");
     return written;
   }
 
@@ -128,9 +139,17 @@ export class SqliteLinks implements LinkStore {
   }
 
   delete(name: string): boolean {
-    // Gone from the redirect first: if the database then fails, the link has still stopped.
+    // Gone from the redirect first, so a delete that throws after the row is gone (a busy
+    // checkpoint) has still stopped the link. One that throws before puts it back: the
+    // redirect follows whatever the database holds.
     this.byName.delete(name);
-    return deleteLink(this.db, name);
+    try {
+      return deleteLink(this.db, name);
+    } catch (err) {
+      const still = getLinkByName(this.db, name);
+      if (still !== undefined) this.byName.set(name, asLink(still));
+      throw err;
+    }
   }
 
   dailyCounts(id: number): DailyCount[] {

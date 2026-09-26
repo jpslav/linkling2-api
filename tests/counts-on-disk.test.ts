@@ -2,10 +2,11 @@
 // be read off the disk; the day's counts are written once, after the day, in one go.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { AddressInfo } from "node:net";
+import { connect, type AddressInfo } from "node:net";
 import { join } from "node:path";
+import BetterSqlite3 from "better-sqlite3";
 import { afterEach, describe, expect, test } from "vitest";
-import { msUntilFlush, startService, type Running } from "../src/server.js";
+import { CLOSE_WAIT_MS, msUntilFlush, startService, type Running } from "../src/server.js";
 import { apiCall, appWith, countRows, seed, tempLinks } from "./support/app.js";
 import { bearer, TEST_KEY } from "./support/team-key.js";
 import { tempDir } from "./temp-db.js";
@@ -84,6 +85,43 @@ describe("ADR-0014 counts on disk", () => {
     expect(countRows(links)).toEqual([{ link_id: link.id, day: "2026-09-26", count: 1 }]);
   });
 
+  test("the midnight write leaves the new day's follows in memory until the next", async () => {
+    const links = tempLinks();
+    const link = seed(links, "a", "https://example.com/a");
+    let now = new Date("2026-09-26T23:59:00Z");
+    const app = appWith(links, { now: () => now });
+    await app.inject({ method: "GET", url: "/a" });
+    now = new Date("2026-09-27T00:00:02Z");
+    await app.inject({ method: "GET", url: "/a" });
+
+    expect(links.flushCounts("2026-09-27")).toBe(1);
+    expect(links.db.prepare("SELECT link_id, day, count FROM daily_counts").all()).toEqual([
+      { link_id: link.id, day: "2026-09-26", count: 1 },
+    ]);
+    expect(links.dailyCounts(link.id)).toEqual([
+      { day: "2026-09-26", count: 1 },
+      { day: "2026-09-27", count: 1 },
+    ]);
+  });
+
+  test("a write whose WAL cannot be truncated says so, and does not write twice", async () => {
+    const links = tempLinks();
+    const link = seed(links, "a", "https://example.com/a");
+    const app = appWith(links, { now: () => new Date("2026-09-26T09:00:00Z") });
+    await app.inject({ method: "GET", url: "/a" });
+    const reader = new BetterSqlite3(links.db.name, { timeout: 0 });
+    links.db.pragma("busy_timeout = 0");
+    try {
+      reader.exec("BEGIN");
+      reader.prepare("SELECT count(*) FROM links").get();
+      expect(() => links.flushCounts()).toThrow(/kept the WAL from being truncated/);
+    } finally {
+      reader.close();
+    }
+    expect(links.flushCounts(), "the committed follows are not written again").toBe(0);
+    expect(countRows(links)).toEqual([{ link_id: link.id, day: "2026-09-26", count: 1 }]);
+  });
+
   test("the write is scheduled five seconds after each UTC midnight", () => {
     expect(msUntilFlush(new Date("2026-09-26T23:59:59Z"))).toBe(6_000);
     expect(msUntilFlush(new Date("2026-09-26T12:00:00Z"))).toBe(12 * 3_600_000 + 5_000);
@@ -120,4 +158,33 @@ describe("the running service writes the day's follows when it stops", () => {
     const counts = await fetch(`http://127.0.0.1:${port}/-/api/links/kept/counts`, { headers: bearer(TEST_KEY) });
     expect(((await counts.json()) as { total: number }).total).toBe(3);
   });
+
+  test("a request that never finishes cannot hold the stop past its wait, or cost the counts", async () => {
+    const data = tempDir();
+    const running = (await startService({ LINKLING_KEY: TEST_KEY, LINKLING_DATA: data, PORT: "0" }, () => {}))!;
+    const port = (running.app.server.address() as AddressInfo).port;
+    await fetch(`http://127.0.0.1:${port}/-/api/links`, {
+      method: "POST",
+      headers: { ...bearer(TEST_KEY), "content-type": "application/json" },
+      body: JSON.stringify({ url: "https://example.com/kept", name: "kept" }),
+    });
+    for (let i = 0; i < 3; i++) await fetch(`http://127.0.0.1:${port}/kept`, { redirect: "manual" });
+    // Headers begun and never ended: the connection stays open as long as the client likes.
+    const stalled = connect(port, "127.0.0.1");
+    await new Promise((open) => stalled.once("connect", open));
+    stalled.write("GET /kept HTTP/1.1\r\nHost: x\r\n");
+    try {
+      const started = Date.now();
+      await running.close();
+      expect(Date.now() - started).toBeLessThan(CLOSE_WAIT_MS + 1_000);
+    } finally {
+      stalled.destroy();
+    }
+    const db = new BetterSqlite3(join(data, "linkling.db"));
+    try {
+      expect(db.prepare("SELECT sum(count) AS n FROM daily_counts").get()).toEqual({ n: 3 });
+    } finally {
+      db.close();
+    }
+  }, 10_000);
 });

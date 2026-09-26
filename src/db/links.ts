@@ -107,7 +107,7 @@ export function setTarget(db: Database, name: string, target: string): Link | un
  * empties it, so the WAL keeps no copy of pages as they were before the last write
  * (ADR-0012). Throws `busyMessage` when another connection kept it from finishing.
  */
-function truncateWal(db: Database, busyMessage: string): void {
+export function truncateWal(db: Database, busyMessage: string): void {
   const [result] = db.pragma("wal_checkpoint(TRUNCATE)") as { busy: number }[];
   if (result?.busy !== 0) throw new Error(busyMessage);
 }

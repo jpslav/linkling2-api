@@ -33,23 +33,45 @@ written to disk?" in `products/linkling/DECISIONS.md`. This ADR is how the servi
   holds the database (ADR-0006), so nothing else can change it underneath.
 - **A follow is tallied in memory,** by link id and UTC day.
 - **The tallies are written once a day.** `startService` (`src/server.ts`) calls
-  `flushCounts` five seconds after each UTC midnight, and once more at shutdown. The write
-  is one transaction for every link and day, followed by `wal_checkpoint(TRUNCATE)`.
-  Inside one transaction SQLite writes pages in page order, so the write carries no click
-  order. The checkpoint then empties the WAL. The files' modification times then say "a
-  daily write, or a shutdown", never when anyone clicked.
+  `flushCounts` five seconds after each UTC midnight, and once more at shutdown.
+  - The midnight write covers only the days that are over. Follows in the new day's first
+    seconds wait for the next write, so nothing on disk shows a click just after midnight.
+  - Each write is one transaction, with rows inserted in (link, day) order rather than
+    the order anyone clicked. It is followed by `wal_checkpoint(TRUNCATE)`, which throws
+    when another connection keeps it from emptying the WAL, as in ADR-0012.
+  - The files' modification times then say "a daily write, or a shutdown", never when
+    anyone clicked.
+- **`daily_counts` keeps no rowid.** Migration `0002_daily_counts_without_rowid.sql`
+  rebuilds it `WITHOUT ROWID`, keeping its rows. A rowid is handed out in insertion order.
+  It would last in the file and record which link was first counted before which, and,
+  across writes, which links were first clicked after a restart. Without one, a row is
+  stored by its key (link, day) alone. The columns are unchanged, so
+  `privacy-manifest.json` is unchanged.
+- **A stop cannot be held up by a request.** At shutdown the tallies are written first.
+  The service then waits at most three seconds for requests in flight (Docker kills a
+  container ten seconds after SIGTERM) and writes again. Then it closes the database and
+  exits, even if a connection is still open. A half-sent request, which anyone can make,
+  therefore cannot cost the day's counts.
 - **What the team sees includes the tallies.** A link's counts (`/-/api/links/:name/counts`,
   and the stats page through the same store) add the unwritten tallies to what is on disk,
   so today's count is current all day.
-- **A write that fails** keeps the tallies for the next write and logs one fixed line,
-  `linkling: daily counts not written; kept for the next write`, with nothing from the
-  error (ADR-0004).
+- **A write that fails** logs one fixed line, `linkling: writing the daily counts failed`,
+  with nothing from the error. A write that did not commit keeps its tallies for the next
+  write. One that committed but could not truncate the WAL is not written again. That
+  line comes from the timer or the shutdown, never from a request, so the manifest's "handling a
+  request writes nothing about it to any log" stays true.
 
-`tests/counts-on-disk.test.ts` pins it. Following links (GET, HEAD, 404 and 410) leaves
-every database file's bytes and modification time unchanged. The watch does see the
-day's write, which is its blind arm. That write lands in one go, leaves the WAL empty,
-survives a failure, and happens at shutdown. Switching back to one write per click turns
-three of its tests red.
+`tests/counts-on-disk.test.ts` pins this:
+
+- Following links (GET, HEAD, 404 and 410) leaves every database file's bytes and
+  modification time unchanged. The watch does see the day's write, which is its blind arm.
+- That write lands in one go and leaves the WAL empty.
+- It survives a failure, and says so when the WAL stays.
+- The midnight write leaves the new day alone.
+- A stop writes the counts even with a stalled request open.
+
+Switching back to one write per click turns three of its tests red. `tests/db.test.ts`
+pins the missing rowid and the migration.
 
 Rejected:
 

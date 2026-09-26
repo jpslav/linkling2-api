@@ -6,6 +6,7 @@ import type { Database } from "better-sqlite3";
 import type { FastifyInstance, FastifyListenOptions } from "fastify";
 import { buildApp } from "./app.js";
 import { openDatabase } from "./db/open.js";
+import { utcDay } from "./db/links.js";
 import { SqliteLinks, type LinkStore } from "./store.js";
 import { keyProblem } from "./team-key.js";
 
@@ -48,14 +49,18 @@ export function msUntilFlush(now: Date): number {
   return next - now.getTime();
 }
 
-/** Writes the tallied follows; a failure keeps them for the next write and says so. */
-function flush(links: SqliteLinks, stderr: (line: string) => void): void {
+// How long a stop waits for requests still in flight before it writes and closes anyway.
+// Docker gives a container ten seconds after SIGTERM before it kills it.
+export const CLOSE_WAIT_MS = 3_000;
+
+/** Writes the tallied follows (only days before `before`, when given), or says it could not. */
+function flush(links: SqliteLinks, stderr: (line: string) => void, before?: string): void {
   try {
-    links.flushCounts();
+    links.flushCounts(before);
   } catch {
     // Nothing from the error: this runs from a timer or at shutdown, never for a request,
-    // and says only that the write failed.
-    stderr("linkling: daily counts not written; kept for the next write");
+    // and says only that writing the counts went wrong.
+    stderr("linkling: writing the daily counts failed");
   }
 }
 
@@ -102,22 +107,30 @@ export async function startService(env: NodeJS.ProcessEnv, stderr: (line: string
   const store = links!;
   // The day's follows are written once, just after it ends (ADR-0014).
   let timer: NodeJS.Timeout;
+  // Only the days already over: the new day's first follows wait for the next write.
   const schedule = (): void => {
     timer = setTimeout(() => {
-      flush(store, stderr);
+      flush(store, stderr, utcDay(new Date()));
       schedule();
     }, msUntilFlush(new Date()));
     timer.unref();
   };
   schedule();
+  let closing: Promise<void> | undefined;
   return {
     app: running,
-    close: async () => {
-      clearTimeout(timer);
-      await running.close();
-      flush(store, stderr);
-      db?.close();
-    },
+    close: () =>
+      (closing ??= (async () => {
+        clearTimeout(timer);
+        // Written before waiting, so a request that never finishes cannot cost the day's
+        // counts; then once more for anything followed while the last requests finished.
+        flush(store, stderr);
+        let waited: NodeJS.Timeout | undefined;
+        await Promise.race([running.close(), new Promise((done) => (waited = setTimeout(done, CLOSE_WAIT_MS)))]);
+        clearTimeout(waited);
+        flush(store, stderr);
+        db?.close();
+      })()),
   };
 }
 
@@ -126,9 +139,10 @@ if (import.meta.main) {
   if (running === null) {
     process.exitCode = 1;
   } else {
-    // `docker compose down` sends SIGTERM: finish what is in flight and close the database.
+    // `docker compose down` sends SIGTERM: write the counts, give requests in flight a few
+    // seconds, close the database, and leave even if a connection is still open.
     for (const signal of ["SIGTERM", "SIGINT"] as const) {
-      process.once(signal, () => void running.close());
+      process.on(signal, () => void running.close().then(() => process.exit(0)));
     }
   }
 }
