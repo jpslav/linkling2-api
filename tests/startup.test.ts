@@ -58,7 +58,7 @@ describe("startup", () => {
   });
 
   test("refuses a LINKLING_SITE that is not an http or https address, before it opens the store", async () => {
-    for (const site of ["linkling.example.org", "ftp://linkling.example.org", "javascript:alert(1)", "https://x.example/?a=1", "https://x.example/?", "https://x.example/#top", "https://x.example/a#", "https://u:p@x.example"]) {
+    for (const site of ["linkling.example.org", "ftp://linkling.example.org", "javascript:alert(1)", "https://x.example/?a=1", "https://x.example/?", "https://x.example/#top", "https://x.example/a#", "https://x.example ", " https://x.example", "https://x.example/a\tb", "https://u:p@x.example"]) {
       const { start, said, opened } = io();
       expect(await main({ LINKLING_KEY: TEST_KEY, LINKLING_SITE: site }, start)).toBeNull();
       expect(said).toEqual([

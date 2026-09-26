@@ -37,9 +37,10 @@ export function siteProblem(site: string | undefined): string | null {
     return problem;
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return problem;
-  // `?` and `#` are tested on the text: URL reports an empty query or fragment as "", and
-  // either would swallow the `/privacy.html` appended after it.
-  if (url.username !== "" || url.password !== "" || /[?#]/.test(site)) return problem;
+  // Tested on the text, which privacyUrl appends to as it is: URL reports an empty query or
+  // fragment as "", either of which would swallow `/privacy.html`, and it drops spaces and
+  // control characters at the ends, which would break the link once something follows them.
+  if (url.username !== "" || url.password !== "" || /[?#\x00-\x20\x7f]/.test(site)) return problem;
   return null;
 }
 
