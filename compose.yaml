@@ -5,6 +5,8 @@ services:
     environment:
       # No default key to forget to change (ADR-0005): compose refuses to start without one.
       LINKLING_KEY: ${LINKLING_KEY:?set LINKLING_KEY to the team key}
+      # Optional: the public site's address, for the stats page's Privacy link (ADR-0015).
+      LINKLING_SITE: ${LINKLING_SITE:-}
     ports:
       # PORT_BASE is the program's port lease, so two stacks on one machine never collide.
       - "${PORT_BASE:-8080}:8080"

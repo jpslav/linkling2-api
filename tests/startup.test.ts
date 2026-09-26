@@ -56,6 +56,31 @@ describe("startup", () => {
     const health = await fetch(`http://127.0.0.1:${port}/-/health`);
     expect([health.status, await health.text()]).toEqual([200, "ok\n"]);
   });
+
+  test("refuses a LINKLING_SITE that is not an http or https address, before it opens the store", async () => {
+    for (const site of ["linkling.example.org", "ftp://linkling.example.org", "javascript:alert(1)", "https://x.example/?a=1", "https://u:p@x.example"]) {
+      const { start, said, opened } = io();
+      expect(await main({ LINKLING_KEY: TEST_KEY, LINKLING_SITE: site }, start)).toBeNull();
+      expect(said).toEqual([
+        "linkling: LINKLING_SITE must be the public site's http or https address, such as https://linkling.example.org; the service will not start with it set like this.",
+      ]);
+      expect(opened.count).toBe(0);
+    }
+  });
+
+  test("links the stats page's Privacy to LINKLING_SITE when set, and starts without it when empty", async () => {
+    for (const [site, privacy] of [
+      ["https://linkling.example.org/about/", "https://linkling.example.org/about/privacy.html"],
+      ["", "https://github.com/jpslav/linkling2-web/blob/main/privacy.html"],
+    ] as const) {
+      const { start, said } = io();
+      const app = await main({ LINKLING_KEY: TEST_KEY, LINKLING_SITE: site }, start);
+      expect([app === null, said]).toEqual([false, []]);
+      started.push(app!);
+      const page = await app!.inject({ method: "GET", url: "/-/stats", headers: bearer(TEST_KEY) });
+      expect(page.body).toContain(`<a href="${privacy}">Privacy</a>`);
+    }
+  });
 });
 
 // The direct run: what `node dist/server.js` does with its environment.

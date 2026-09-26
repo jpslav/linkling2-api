@@ -7,6 +7,7 @@ import type { FastifyInstance, FastifyListenOptions } from "fastify";
 import { buildApp } from "./app.js";
 import { openDatabase } from "./db/open.js";
 import { utcDay } from "./db/links.js";
+import { siteProblem } from "./stats.js";
 import { SqliteLinks, type LinkStore } from "./store.js";
 import { keyProblem } from "./team-key.js";
 
@@ -29,7 +30,14 @@ export async function main(env: NodeJS.ProcessEnv, io: StartIo): Promise<Fastify
     io.stderr(refusal(problem ?? "is not set"));
     return null;
   }
-  const app = buildApp({ links: await io.openLinks(), key });
+  // Optional: unset or empty, the stats page's Privacy link takes its fallback (ADR-0015).
+  const site = env.LINKLING_SITE === "" ? undefined : env.LINKLING_SITE;
+  const siteIssue = siteProblem(site);
+  if (siteIssue !== null) {
+    io.stderr(`linkling: LINKLING_SITE ${siteIssue}; the service will not start with it set like this.`);
+    return null;
+  }
+  const app = buildApp({ links: await io.openLinks(), key, site });
   await app.listen(io.listen);
   return app;
 }

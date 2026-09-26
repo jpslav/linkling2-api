@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { createLink, getDailyCount, incrementCount, listDailyCounts } from "../src/db/links.js";
 import { apiCall, appWith, countRows, seed, tempLinks } from "./support/app.js";
+import { basic, TEST_KEY } from "./support/team-key.js";
 import { openTempDatabase } from "./temp-db.js";
 
 // R-009, data-layer half: here a follow is incrementCount; following through the
@@ -128,6 +129,13 @@ describe("R-009 counting follows through the redirect", () => {
     }
     expect(answers).toEqual([302, 410, 410, 404, 404, 302]);
     expect(countRows(links)).toEqual([{ link_id: live.id, day: "2026-09-26", count: 1 }]);
+  });
+
+  // The privacy page's half is linkling-web's: it carries privacy-manifest.json's "counted" text.
+  test("R-029 what counts: the stats page says previews count", async () => {
+    const res = await appWith().inject({ method: "GET", url: "/-/stats", headers: basic("", TEST_KEY) });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain("Counts include the automatic fetch chat apps make to preview a pasted link.");
   });
 
   test("a count that cannot be taken still redirects, and writes nothing to any log", async () => {
