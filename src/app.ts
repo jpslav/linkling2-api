@@ -21,6 +21,9 @@ export interface AppDeps {
   randomIndex?: RandomIndex;
 }
 
+// A URL a client meant for the API, however it spelled the prefix: `/-/API/`, `/%2D/api/`.
+const API_PATH = /^\/(-|%2d)\/api\//i;
+
 // What a client error on the API says. Fastify's own messages can quote the request back.
 const CLIENT_ERRORS: Record<number, string> = {
   400: "the body is not valid JSON",
@@ -72,7 +75,7 @@ export function buildApp({
   // A client of the API gets its 404 as JSON like every other API answer, a browser the
   // plain page. Only the answer's format follows the URL's text; nothing is guarded by it.
   function notFound(url: string, reply: FastifyReply): FastifyReply {
-    if (url.startsWith("/-/api/")) return sendJson(reply, 404, { error: "no such link or route" });
+    if (API_PATH.test(url)) return sendJson(reply, 404, { error: "no such link or route" });
     return plainPage(reply, 404, "No such link.");
   }
 

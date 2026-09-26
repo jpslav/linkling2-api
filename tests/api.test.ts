@@ -35,6 +35,14 @@ describe("R-001 a team member makes a short link under a name they choose", () =
     const res = await apiCall(app, "POST", "/-/api/links", { url: "https://example.com/a", made_by: "  ana " });
     expect(res.json().made_by).toBe("ana");
   });
+
+  test("made_by keeps the joiners that emoji and Persian spelling need", async () => {
+    const app = appWith();
+    for (const madeBy of ["👨‍👩‍👧 team", "دانش‌آموز", "🎉 party"]) {
+      const res = await apiCall(app, "POST", "/-/api/links", { url: "https://example.com/a", made_by: madeBy });
+      expect([madeBy, res.statusCode, res.json().made_by]).toEqual([madeBy, 201, madeBy]);
+    }
+  });
 });
 
 describe("a body the API cannot use is refused with a 400 and stores nothing", () => {
@@ -159,6 +167,8 @@ describe("listing and reading links", () => {
       `/-/api/links/${"x".repeat(101)}`, // past Fastify's maxParamLength
       `/-/api/links/${"x".repeat(101)}/counts`,
       "/-/api/nothing-here",
+      "/-/API/nothing-here",
+      "/%2D/api/nothing-here",
     ]) {
       const missing = await apiCall(app, "GET", url);
       expect([url, missing.statusCode, typeof missing.json().error]).toEqual([url, 404, "string"]);
