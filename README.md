@@ -83,12 +83,72 @@ curl -s -X POST http://localhost:8080/-/api/links \
   -d '{"url":"https://example.com/a","name":"q3-plan","made_by":"ana","expires":"7d"}'
 ```
 
+## The `linkling` command
+
+Make, list, edit, delete and count links from a terminal, with only Node and the team key.
+It is this package's `bin`, so it is built and installed from here (ADR-0007,
+[ADR-0016](docs/adr/0016-linkling-command.md)):
+
+```bash
+npm ci && npm run build && npm install -g .    # npm links this folder: keep it, and dist/, in place
+export LINKLING_BASE=http://localhost:8080     # where the service answers: an origin, no path
+export LINKLING_KEY=choose-a-team-key          # the team key
+linkling make https://example.com/plan --name q3-plan --expires 7d
+```
+
+After a `git pull`, `npm run build` refreshes the installed command (run `npm ci` first if
+`package-lock.json` changed). `npm uninstall -g linkling-api` removes it.
+
+| Command | Does | Prints |
+|---|---|---|
+| `linkling make <url> [--name <name>] [--expires <date\|lifetime>] [--by <name>]` | makes a link; without `--name` the service makes one up | the short link, `$LINKLING_BASE/<name>` |
+| `linkling list` | lists every link, newest first | name, made by, expires, target |
+| `linkling edit <name> <url>` | changes where a link points; its name, counts and maker stay | `<short link> -> <target>` |
+| `linkling delete <name>` | deletes a link, with no confirmation question | `deleted <name>` |
+| `linkling counts <name>` | shows a link's followed count for each UTC day | `<name>: <total> total`, then one line per day |
+
+- **`--expires`** is a date `YYYY-MM-DD` (to the end of that UTC day) or a lifetime such as `7d`,
+  `36h`, `90m` or `30s`; without it the link never expires, and `list` shows `never`. An expired
+  link stays listed as `expired <time>`.
+- **`--by`** is who made the link. Without it the command sends `$USER`, and when that is not
+  set, the system's login name. Nothing checks it (ADR-0005).
+- **The service decides what is valid.** The command sends names, expiries and URLs as given
+  and prints the service's own sentence when it refuses one, such as
+  `linkling: the name "q3-plan" is already taken (409)`.
+
+**In scripts**, use the exit code and `--json`; the human output above can change. `--json`,
+on any command, prints the service's answer as one line of JSON, unchanged
+([ADR-0013](docs/adr/0013-team-api.md)'s link, `{"links": [...]}` or `{"name", "total", "days"}`);
+for `delete` it prints `{"name": "<name>", "deleted": true}`. An error goes to stderr, its
+first line beginning `linkling: ` (a missing or unknown command adds the usage after it), and
+stdout carries only results.
+
+| Exit | Means |
+|---|---|
+| 0 | done |
+| 1 | the service said no: a taken name (409), no such link (404), a value it refuses (400) |
+| 2 | the command line or `LINKLING_BASE`/`LINKLING_KEY` is wrong; nothing was sent |
+| 3 | the team key was refused (401) |
+| 4 | no usable answer: the service is not there or is silent for 10 s, redirects, fails (5xx), or is not Linkling's API (a `204` to a `delete` is taken as done, whoever sends it) |
+| 70 | a bug in the command itself, or output it cannot write |
+
+```bash
+short=$(linkling make https://example.com/plan --name q3-plan) || exit
+linkling counts q3-plan --json
+```
+
 ## Develop
 
 ```bash
 npm ci
 npm run typecheck && npm run build && npm test
 LINKLING_BASE=http://localhost:8080 LINKLING_KEY=... scripts/latency.sh   # R-016's p95
+LINKLING_BASE=http://localhost:8080 LINKLING_KEY=... scripts/cli-e2e.sh   # R-015 against a running stack, with `linkling` on PATH
 ```
+
+`scripts/cli-e2e.sh` prints `CLI E2E PASS` (exit 0) or `CLI E2E FAIL: <step>` (exit 1), and
+`CLI E2E BLIND: <what was missing>` (exit 2) when there is no `linkling`, no key or address,
+no service to try it on, a key the service refuses, or a link called `cli-test` already there
+(R-015's line makes that name).
 
 Decisions are in [docs/adr/](docs/adr/README.md).
