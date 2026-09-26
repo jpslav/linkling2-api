@@ -51,12 +51,14 @@ test("following links writes no log line and stores nothing about the clicker", 
   expect(dbBytes.includes("https://example.com/q3"), "blind: the link's own target is not in the bytes read").toBe(true);
 
   expect(status, output).toBe(0);
-  // 302 for the link, 404 unknown, 410 expired, 500 store failure, 404 bad escape, 404 /-/.
-  expect(output).toContain('follow-a-link: DONE [302,404,410,500,404,404]');
+  // Through inject: 302 for the link, 404 unknown, 410 expired, 500 store failure, 404 bad
+  // escape, 404 /-/. Over a socket: 302 for the link, 400 for a request line that is not HTTP.
+  // A cookie on any response would appear in this line too.
+  expect(output).toContain('follow-a-link: DONE [302,404,410,500,404,404,302,400]');
 
   // No request log: the child's own three lines are the whole output.
   const lines = output.split("\n").filter((l) => l.length > 0);
-  expect(lines).toEqual([CANARY_CONSOLE, CANARY_FD, "follow-a-link: DONE [302,404,410,500,404,404]"]);
+  expect(lines).toEqual([CANARY_CONSOLE, CANARY_FD, "follow-a-link: DONE [302,404,410,500,404,404,302,400]"]);
 
   for (const [what, value] of Object.entries(clicker)) {
     expect(output.includes(value), `the clicker's ${what} is in the service's output`).toBe(false);

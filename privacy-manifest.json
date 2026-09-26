@@ -1,5 +1,5 @@
 {
-  "about": "Everything the Linkling service stores, and for how long (ADR-0004, ADR-0011). tests/privacy-manifest.test.ts fails unless the fields below are exactly the database's columns; linkling-web's privacy page carries every what, kept, counted and logged text below word for word, and its checks/privacy-matches-service.sh fails when it does not.",
+  "about": "Everything the Linkling service stores, and for how long (ADR-0004, ADR-0011, ADR-0012). tests/privacy-manifest.test.ts fails unless the fields below are exactly the database's columns; linkling-web's privacy page carries every what, kept, counted and logged text below word for word, and its checks/privacy-matches-service.sh fails when it does not.",
   "stored": [
     {
       "id": "link-name",
@@ -16,7 +16,7 @@
     {
       "id": "link-maker",
       "fields": ["links.made_by"],
-      "what": "The name the link's maker gave for themselves",
+      "what": "The maker's name, as they gave it (often their computer login name)",
       "kept": "Until the link is deleted"
     },
     {
@@ -40,7 +40,7 @@
     {
       "id": "daily-counts",
       "fields": ["daily_counts.link_id", "daily_counts.day", "daily_counts.count"],
-      "what": "For each link and each day (in UTC), how many times the link was followed that day",
+      "what": "For each link and each calendar day (in UTC, the same clock for everyone), how many times the link was followed that day",
       "kept": "Forever, even after the link is deleted. A deleted link's counts stay under its internal number, tied to no name, and are shown nowhere"
     },
     {
@@ -50,6 +50,6 @@
       "kept": "Forever"
     }
   ],
-  "counted": "A link's count for the day goes up by one each time the link sends someone on to its target. Chat apps fetch a pasted link once to show a preview, and that fetch counts too: telling it apart from a person would mean reading something about each visitor, which Linkling does not do.",
+  "counted": "A link's count for the day goes up by one each time someone opening it is sent on to its target. Opening a link that does not exist or has expired adds nothing, and neither does a tool that only checks whether a link works without opening it. Chat apps and other programs often open a pasted link by themselves, to show a preview or to check that it is safe, and those count too: telling them apart from people would mean reading something about each visitor, which Linkling does not do.",
   "logged": "The service writes no access log, and handling a request writes nothing about it to any log."
 }

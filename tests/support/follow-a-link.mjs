@@ -10,6 +10,8 @@
 // CANARY_FD straight to descriptor 1, both before the app exists, and last a DONE line
 // with the status codes it saw. Anything else in its output came from the app.
 import { existsSync, writeSync } from "node:fs";
+import { request } from "node:http";
+import { connect } from "node:net";
 import { registerHooks } from "node:module";
 import { fileURLToPath } from "node:url";
 
@@ -64,6 +66,30 @@ for (const url of ["/q3-plan", "/nope", "/old", "/boom", "/%zz", "/-/nothing-her
   // The privacy page says the service sets no cookies.
   if (res.headers["set-cookie"] !== undefined) statuses.push(`cookie on ${url}`);
 }
+
+// The same over a real socket, where Node's HTTP server is in the path too: one follow,
+// then a request line no server can parse, which goes through the client-error path
+// instead of a route. The address here is the loopback one, so only the browser and
+// referrer are canaries on this leg.
+await app.listen({ host: "127.0.0.1", port: 0 });
+const { port } = app.server.address();
+statuses.push(
+  await new Promise((resolve, reject) => {
+    request({ host: "127.0.0.1", port, path: "/q3-plan", headers }, (res) => {
+      res.resume();
+      resolve(res.headers["set-cookie"] === undefined ? res.statusCode : `cookie on socket ${res.statusCode}`);
+    }).on("error", reject).end();
+  }),
+);
+statuses.push(
+  await new Promise((resolve, reject) => {
+    const socket = connect(port, "127.0.0.1", () => socket.write(`NOT HTTP ${clicker.userAgent}\r\n\r\n`));
+    let reply = "";
+    socket.on("data", (d) => (reply += d));
+    socket.on("end", () => resolve(Number(/^HTTP\/1\.1 (\d{3})/.exec(reply)?.[1] ?? 0)));
+    socket.on("error", reject);
+  }),
+);
 await app.close();
 db.close();
 

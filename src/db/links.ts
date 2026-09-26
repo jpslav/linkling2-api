@@ -79,7 +79,12 @@ export function getLinkByName(db: Database, name: string): Link | undefined {
  * link by that name existed.
  */
 export function deleteLink(db: Database, name: string): boolean {
-  return db.prepare("DELETE FROM links WHERE name = ?").run(name).changes > 0;
+  const deleted = db.prepare("DELETE FROM links WHERE name = ?").run(name).changes > 0;
+  // The WAL still holds the page as it was before the delete; copying it into the main
+  // file (where secure_delete has zeroed the row) and truncating it removes that copy
+  // (ADR-0012).
+  if (deleted) db.pragma("wal_checkpoint(TRUNCATE)");
+  return deleted;
 }
 
 /** One use of a link: that UTC day's count for it goes up by one, in a single upsert. */
