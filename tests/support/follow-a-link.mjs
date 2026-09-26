@@ -43,22 +43,22 @@ writeSync(2, `${CANARY_ERR_FD}\n`);
 
 const { buildApp } = await import("../../src/app.ts");
 const { openDatabase } = await import("../../src/db/open.ts");
-const { createLink, getLinkByName } = await import("../../src/db/links.ts");
+const { createLink } = await import("../../src/db/links.ts");
+const { SqliteLinks } = await import("../../src/store.ts");
 
 const now = new Date("2026-09-26T12:00:00Z");
 const db = openDatabase(dbPath);
 createLink(db, { name: "q3-plan", target: "https://example.com/q3", madeBy: "sam", expiresAt: null }, now);
 createLink(db, { name: "old", target: "https://example.com/old", madeBy: "sam", expiresAt: new Date("2026-01-01T00:00:00Z") }, now);
 
-// A store over the real database. The route does not count follows yet (LL-007 wires
-// counting and the server's own store); when it does, this should build the app the way
-// src/server.ts does, so the database scan sees what a real follow writes.
-const links = {
-  async lookup(name) {
-    if (name === "boom") throw new Error(`store failed for ${clicker.address}`);
-    const link = getLinkByName(db, name);
-    return link === undefined ? null : { target: link.target, expiresAt: link.expiresAt === null ? null : new Date(link.expiresAt) };
-  },
+// The app as src/server.ts builds it: the SQLite store over the one database handle. Only
+// `boom` is made to fail, with an error whose message carries the clicker's address, which
+// must therefore never be logged.
+const links = new SqliteLinks(db);
+const lookup = links.lookup.bind(links);
+links.lookup = async (name) => {
+  if (name === "boom") throw new Error(`store failed for ${clicker.address}`);
+  return lookup(name);
 };
 
 const app = buildApp({ links, key: "team-key-for-the-test", now: () => now });
@@ -105,11 +105,12 @@ statuses.push(
 );
 await app.close();
 
-// Nothing a follow writes reaches the database yet, so the scan has nothing of a follow
-// to look at. When LL-007 makes follows count, this fails: build the app the way
-// src/server.ts does from then on, so the scan covers what a real follow writes.
-const counted = db.prepare("SELECT count(*) AS n FROM daily_counts").get().n;
-if (counted !== 0) statuses.push("counting is wired: build the app the way src/server.ts does");
+// What src/server.ts does at shutdown: the tallied follows are written (ADR-0014). The two
+// follows of q3-plan, one injected and one over the socket, must then be in the file the
+// test scans, or the scan never saw a real count write.
+links.flushCounts();
+const counted = db.prepare("SELECT sum(count) AS n FROM daily_counts").get().n;
+if (counted !== 2) statuses.push(`expected 2 follows written, found ${counted}`);
 db.close();
 
 writeSync(1, `follow-a-link: DONE ${JSON.stringify(statuses)}\n`);

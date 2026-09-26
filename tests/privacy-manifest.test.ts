@@ -101,7 +101,7 @@ test("a new column the manifest does not list, or an entry the schema lacks, is 
   const dir = tempDir();
   for (const f of readdirSync(MIGRATIONS_DIR)) copyFileSync(join(MIGRATIONS_DIR, f), join(dir, f));
   writeFileSync(
-    join(dir, "0002_scratch.sql"),
+    join(dir, "0003_scratch.sql"),
     "ALTER TABLE links ADD COLUMN clicker_ip TEXT;\n" +
       // pragma_table_info leaves generated columns out; the pin must still see them.
       "ALTER TABLE links ADD COLUMN target_start TEXT GENERATED ALWAYS AS (substr(target, 1, 8)) VIRTUAL;\n",

@@ -6,6 +6,7 @@ import {
   incrementCount,
   listDailyCounts,
 } from "../src/db/links.js";
+import { apiCall, appWith, countRows, seed, tempLinks } from "./support/app.js";
 import { openTempDatabase } from "./temp-db.js";
 
 const day1 = new Date("2026-09-26T09:00:00Z");
@@ -40,4 +41,44 @@ test("deleting a link removes its row and keeps its counts under an id never reu
 test("deleting a name that does not exist reports false", () => {
   const db = openTempDatabase();
   expect(deleteLink(db, "nope")).toBe(false);
+});
+
+// R-007 through the service.
+test("R-007: deleting a followed link stops it at once, keeps its counts, and a remade name starts from 0", async () => {
+  const links = tempLinks();
+  const doomed = seed(links, "q3-plan", "https://example.com/q3");
+  const app = appWith(links);
+  await app.inject({ method: "GET", url: "/q3-plan" });
+  await app.inject({ method: "GET", url: "/q3-plan" });
+  const countsBefore = countRows(links);
+  expect(countsBefore.map((r) => [r.link_id, r.count])).toEqual([[doomed.id, 2]]);
+
+  const res = await apiCall(app, "DELETE", "/-/api/links/Q3-Plan");
+  expect([res.statusCode, res.body]).toEqual([204, ""]);
+
+  const follow = await app.inject({ method: "GET", url: "/q3-plan" });
+  expect([follow.statusCode, follow.headers.location]).toEqual([404, undefined]);
+  expect(links.db.prepare("SELECT * FROM links WHERE id = ?").all(doomed.id)).toEqual([]);
+  expect(countRows(links)).toEqual(countsBefore);
+  expect((await apiCall(app, "GET", "/-/api/links/q3-plan/counts")).statusCode).toBe(404);
+
+  const remade = await apiCall(app, "POST", "/-/api/links", { url: "https://example.com/new", name: "q3-plan", made_by: "kim" });
+  expect(remade.statusCode).toBe(201);
+  expect((await apiCall(app, "GET", "/-/api/links/q3-plan/counts")).json()).toEqual({ name: "q3-plan", total: 0, days: [] });
+});
+
+test("a delete the database refuses leaves the link working, as the database still has it", async () => {
+  const links = tempLinks();
+  seed(links, "q3-plan", "https://example.com/q3");
+  links.db.exec("CREATE TRIGGER refuse BEFORE DELETE ON links BEGIN SELECT RAISE(ABORT, 'disk full'); END");
+  const app = appWith(links);
+  expect((await apiCall(app, "DELETE", "/-/api/links/q3-plan")).statusCode).toBe(500);
+  const follow = await app.inject({ method: "GET", url: "/q3-plan" });
+  expect([follow.statusCode, follow.headers.location]).toEqual([302, "https://example.com/q3"]);
+  expect(app.logged).toEqual([]);
+});
+
+test("deleting an unknown name through the API is a 404", async () => {
+  const res = await apiCall(appWith(), "DELETE", "/-/api/links/nope");
+  expect([res.statusCode, typeof res.json().error]).toEqual([404, "string"]);
 });

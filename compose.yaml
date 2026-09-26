@@ -1,0 +1,23 @@
+# Everything Linkling needs, from one `LINKLING_KEY=... docker compose up` (R-024, ADR-0006).
+services:
+  linkling:
+    build: .
+    environment:
+      # No default key to forget to change (ADR-0005): compose refuses to start without one.
+      LINKLING_KEY: ${LINKLING_KEY:?set LINKLING_KEY to the team key}
+    ports:
+      # PORT_BASE is the program's port lease, so two stacks on one machine never collide.
+      - "${PORT_BASE:-8080}:8080"
+    volumes:
+      - linkling-data:/data
+    restart: unless-stopped
+    healthcheck:
+      # The image has no curl; Node's own fetch asks the health route, which needs no key.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/-/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  linkling-data:

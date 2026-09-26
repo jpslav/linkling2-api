@@ -4,7 +4,8 @@ import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, test } from "vitest";
 import { buildApp } from "../src/app.js";
-import { MemoryLinks } from "./support/memory-links.js";
+import type { SqliteLinks } from "../src/store.js";
+import { linkTo, seed } from "./support/app.js";
 import { bearer, TEST_KEY } from "./support/team-key.js";
 
 // ADR-0009: every header a live redirect may carry, as Node's own client (keep-alive by
@@ -31,7 +32,7 @@ interface Wire {
 }
 
 /** Follows a path over a real socket, as curl would, and reports what came back. */
-async function overTheWire(links: MemoryLinks, path: string, headers: Record<string, string> = {}): Promise<Wire> {
+async function overTheWire(links: SqliteLinks, path: string, headers: Record<string, string> = {}): Promise<Wire> {
   const app = buildApp({ links, key: TEST_KEY });
   opened.push(app);
   await app.listen({ port: 0, host: "127.0.0.1" });
@@ -50,14 +51,14 @@ async function overTheWire(links: MemoryLinks, path: string, headers: Record<str
 
 describe("R-019 uncached redirect", () => {
   test("R-019: a live link answers HTTP/1.1 302 with Cache-Control no-store", async () => {
-    const wire = await overTheWire(new MemoryLinks().make("q3-plan", "https://example.com/a"), "/q3-plan");
+    const wire = await overTheWire(linkTo("q3-plan", "https://example.com/a"), "/q3-plan");
     expect(wire.statusLine).toBe("HTTP/1.1 302");
     expect(wire.headers["cache-control"]).toBe("private, no-store");
     expect(wire.headers.location).toBe("https://example.com/a");
   });
 
   test("R-019: after delete, and after delete-and-remake, the next click gets the new answer", async () => {
-    const links = new MemoryLinks().make("q3-plan", "https://example.com/old");
+    const links = linkTo("q3-plan", "https://example.com/old");
     const app = buildApp({ links, key: TEST_KEY });
     const click = () => app.inject({ method: "GET", url: "/q3-plan" });
 
@@ -65,13 +66,13 @@ describe("R-019 uncached redirect", () => {
     links.delete("q3-plan");
     const gone = await click();
     expect([gone.statusCode, gone.headers.location]).toEqual([404, undefined]);
-    links.make("q3-plan", "https://example.com/new");
+    seed(links, "q3-plan", "https://example.com/new");
     const remade = await click();
     expect([remade.statusCode, remade.headers.location]).toEqual([302, "https://example.com/new"]);
   });
 
   test("ADR-0009: the redirect sends exactly the reviewed headers", async () => {
-    const wire = await overTheWire(new MemoryLinks().make("q3-plan", "https://example.com/a"), "/q3-plan");
+    const wire = await overTheWire(linkTo("q3-plan", "https://example.com/a"), "/q3-plan");
     // Fixed population first: a response with no headers at all must fail, not pass.
     expect(wire.headers.location).toBe("https://example.com/a");
     expect(Object.keys(wire.headers).sort()).toEqual(REDIRECT_HEADERS);
@@ -80,7 +81,7 @@ describe("R-019 uncached redirect", () => {
   });
 
   test("a HEAD request answers the same redirect", async () => {
-    const app = buildApp({ links: new MemoryLinks().make("q3-plan", "https://example.com/a"), key: TEST_KEY });
+    const app = buildApp({ links: linkTo("q3-plan", "https://example.com/a"), key: TEST_KEY });
     const res = await app.inject({ method: "HEAD", url: "/q3-plan" });
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe("https://example.com/a");
@@ -90,7 +91,7 @@ describe("R-019 uncached redirect", () => {
 
 describe("R-017 following a link asks nothing and leaves nothing behind", () => {
   test("R-017: following a live link needs no key and sets no cookie", async () => {
-    const wire = await overTheWire(new MemoryLinks().make("q3-plan", "https://example.com/a"), "/q3-plan");
+    const wire = await overTheWire(linkTo("q3-plan", "https://example.com/a"), "/q3-plan");
     expect(wire.statusLine).toBe("HTTP/1.1 302");
     expect(wire.headers.location).toBe("https://example.com/a");
     expect(wire.headers["referrer-policy"]).toBe("no-referrer");
@@ -100,7 +101,7 @@ describe("R-017 following a link asks nothing and leaves nothing behind", () => 
 
   test("R-017: a wrong key on a click is never consulted", async () => {
     const wire = await overTheWire(
-      new MemoryLinks().make("q3-plan", "https://example.com/a"),
+      linkTo("q3-plan", "https://example.com/a"),
       "/q3-plan",
       bearer("not-the-key"),
     );

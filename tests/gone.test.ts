@@ -1,14 +1,7 @@
-// A link that has gone says so, rather than going anywhere (R-018).
-import { describe, expect, test } from "vitest";
-import { buildApp } from "../src/app.js";
-import { MemoryLinks } from "./support/memory-links.js";
-import { TEST_KEY } from "./support/team-key.js";
-
-const NOW = new Date("2026-09-26T12:00:00Z");
-
-function appAt(links: MemoryLinks, now = NOW) {
-  return buildApp({ links, key: TEST_KEY, now: () => now });
-}
+// A link that has gone says so, rather than going anywhere (R-018), over the SQLite store.
+import { describe, expect, test, vi } from "vitest";
+import type { buildApp } from "../src/app.js";
+import { MADE, appWith, seed, tempLinks } from "./support/app.js";
 
 function expectPlainPage(
   res: Awaited<ReturnType<ReturnType<typeof buildApp>["inject"]>>,
@@ -25,36 +18,40 @@ function expectPlainPage(
 
 describe("R-018 gone links", () => {
   test("R-018: a deleted and a never-made name answer 404 with a body and no Location", async () => {
-    const links = new MemoryLinks().make("q3-plan", "https://example.com/a");
+    const links = tempLinks();
+    seed(links, "q3-plan", "https://example.com/a");
     links.delete("q3-plan");
-    const app = appAt(links);
+    const app = appWith(links, { now: () => MADE });
     expectPlainPage(await app.inject({ method: "GET", url: "/q3-plan" }), 404, "No such link.\n");
     expectPlainPage(await app.inject({ method: "GET", url: "/never-made" }), 404, "No such link.\n");
   });
 
   test("R-018: an expired link answers 410 with a body and no Location", async () => {
-    const links = new MemoryLinks().make("old", "https://example.com/a", new Date("2026-09-25T23:59:59Z"));
-    expectPlainPage(await appAt(links).inject({ method: "GET", url: "/old" }), 410, "This link has expired.\n");
+    const links = tempLinks();
+    seed(links, "old", "https://example.com/a", new Date("2026-09-25T23:59:59Z"), { at: new Date("2026-09-25T12:00:00Z") });
+    expectPlainPage(await appWith(links, { now: () => MADE }).inject({ method: "GET", url: "/old" }), 410, "This link has expired.\n");
   });
 
   test("a link expiring exactly now is expired; one a millisecond later is not", async () => {
-    const links = new MemoryLinks()
-      .make("now", "https://example.com/a", NOW)
-      .make("later", "https://example.com/b", new Date(NOW.getTime() + 1));
-    const app = appAt(links);
+    const links = tempLinks();
+    seed(links, "now", "https://example.com/a", MADE);
+    seed(links, "later", "https://example.com/b", new Date(MADE.getTime() + 1));
+    const app = appWith(links, { now: () => MADE });
     expect((await app.inject({ method: "GET", url: "/now" })).statusCode).toBe(410);
     expect((await app.inject({ method: "GET", url: "/later" })).statusCode).toBe(302);
   });
 
   test("a link with no expiry still redirects a hundred years on", async () => {
-    const links = new MemoryLinks().make("forever", "https://example.com/a", null);
-    const app = appAt(links, new Date("2126-09-26T12:00:00Z"));
+    const links = tempLinks();
+    seed(links, "forever", "https://example.com/a", null);
+    const app = appWith(links, { now: () => new Date("2126-09-26T12:00:00Z") });
     expect((await app.inject({ method: "GET", url: "/forever" })).statusCode).toBe(302);
   });
 
   test("a name of the wrong shape answers the same 404 without a lookup", async () => {
-    const links = new MemoryLinks();
-    const app = appAt(links);
+    const links = tempLinks();
+    const lookup = vi.spyOn(links, "lookup");
+    const app = appWith(links);
     for (const url of [
       "/q3_plan",
       "/favicon.ico",
@@ -67,16 +64,19 @@ describe("R-018 gone links", () => {
     ]) {
       expectPlainPage(await app.inject({ method: "GET", url }), 404, "No such link.\n");
     }
-    expect(links.lookups).toBe(0);
+    expect(lookup).not.toHaveBeenCalled();
   });
 
-  test("a store that fails answers a plain 500 that does not repeat the store's error", async () => {
-    const app = buildApp({
-      links: {
-        lookup: () => Promise.reject(new Error("SQLITE_BUSY at /data/linkling.db")),
-      },
-      key: TEST_KEY,
+  test("a store that fails answers a plain 500, and writes nothing to any log", async () => {
+    const links = tempLinks();
+    links.lookup = () => Promise.reject(new Error("SQLITE_BUSY at /data/linkling.db canary-9d1e"));
+    const app = appWith(links);
+    const res = await app.inject({
+      method: "GET",
+      url: "/q3-plan?who=203.0.113.9",
+      headers: { "user-agent": "ClickerBrowser/1.0", referer: "https://chat.example/room" },
     });
-    expectPlainPage(await app.inject({ method: "GET", url: "/q3-plan" }), 500, "Something went wrong.\n");
+    expectPlainPage(res, 500, "Something went wrong.\n");
+    expect(app.logged).toEqual([]);
   });
 });

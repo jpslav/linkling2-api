@@ -15,13 +15,16 @@ function tableNames(db: BetterSqlite3.Database): string[] {
     .map((r) => r.name);
 }
 
+// The number of the last file in migrations/.
+const LATEST = 2;
+
 test("opening runs the migrations once and leaves exactly ADR-0003's tables", () => {
   const db = openTempDatabase();
-  expect(db.pragma("user_version", { simple: true })).toBe(1);
+  expect(db.pragma("user_version", { simple: true })).toBe(LATEST);
   // sqlite_sequence is SQLite's own, created because links.id is AUTOINCREMENT.
   expect(tableNames(db)).toEqual(["daily_counts", "links", "sqlite_sequence"]);
   expect(migrate(db)).toEqual([]);
-  expect(db.pragma("user_version", { simple: true })).toBe(1);
+  expect(db.pragma("user_version", { simple: true })).toBe(LATEST);
   expect(tableNames(db)).toEqual(["daily_counts", "links", "sqlite_sequence"]);
 });
 
@@ -63,10 +66,37 @@ test("opening a fresh file another connection has locked waits for the lock, the
   const db = openDatabase(path);
   try {
     expect(db.pragma("journal_mode", { simple: true })).toBe("wal");
-    expect(db.pragma("user_version", { simple: true })).toBe(1);
+    expect(db.pragma("user_version", { simple: true })).toBe(LATEST);
   } finally {
     db.close();
     await holder.terminate();
+  }
+});
+
+// ADR-0014: a rowid is handed out in insertion order, which would record the order links
+// were first counted in. Migration 0002 rebuilds the table without one and keeps its rows.
+test("daily_counts has no rowid, and migration 0002 keeps the counts already there", () => {
+  const dir = tempDir();
+  copyFileSync(join(MIGRATIONS_DIR, "0001_links_and_daily_counts.sql"), join(dir, "0001_links_and_daily_counts.sql"));
+  const db = new BetterSqlite3(join(dir, "linkling.db"));
+  try {
+    expect(migrate(db, dir)).toEqual([1]);
+    db.exec("INSERT INTO daily_counts VALUES (7, '2026-09-26', 3), (2, '2026-09-25', 1)");
+    // Blind arm: before 0002 the table has a rowid, so the check below can tell.
+    expect(db.prepare("SELECT rowid, link_id FROM daily_counts ORDER BY rowid").all()).toEqual([
+      { rowid: 1, link_id: 7 },
+      { rowid: 2, link_id: 2 },
+    ]);
+
+    expect(migrate(db)).toEqual([2]);
+    expect(() => db.prepare("SELECT rowid FROM daily_counts").all()).toThrow(/no such column: rowid/);
+    expect(db.prepare("SELECT * FROM daily_counts ORDER BY link_id").all()).toEqual([
+      { link_id: 2, day: "2026-09-25", count: 1 },
+      { link_id: 7, day: "2026-09-26", count: 3 },
+    ]);
+    expect(tableNames(db)).toEqual(["daily_counts", "links", "sqlite_sequence"]);
+  } finally {
+    db.close();
   }
 });
 
@@ -82,8 +112,8 @@ test("a gap in the migration numbers is refused before anything runs", () => {
 
 test("a database from newer code is refused, not downgraded", () => {
   const db = new BetterSqlite3(":memory:");
-  db.pragma("user_version = 2");
-  expect(() => migrate(db)).toThrow(/at migration 2 but this code knows only 0 to 1/);
+  db.pragma(`user_version = ${LATEST + 1}`);
+  expect(() => migrate(db)).toThrow(`at migration ${LATEST + 1} but this code knows only 0 to ${LATEST}`);
 });
 
 test("a negative user_version is refused rather than read as counting from the end", () => {
