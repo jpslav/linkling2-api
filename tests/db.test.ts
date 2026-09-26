@@ -54,7 +54,34 @@ test("a gap in the migration numbers is refused before anything runs", () => {
 test("a database from newer code is refused, not downgraded", () => {
   const db = new BetterSqlite3(":memory:");
   db.pragma("user_version = 2");
-  expect(() => migrate(db)).toThrow(/at migration 2 but this code knows only up to 1/);
+  expect(() => migrate(db)).toThrow(/at migration 2 but this code knows only 0 to 1/);
+});
+
+test("a negative user_version is refused rather than read as counting from the end", () => {
+  const db = new BetterSqlite3(":memory:");
+  db.pragma("user_version = -1");
+  expect(() => migrate(db)).toThrow(/at migration -1/);
+  expect(tableNames(db)).toEqual([]);
+});
+
+test("a .sql file that is not named NNNN_<what>.sql is refused, not skipped", () => {
+  for (const misnamed of ["002_short.sql", "0002-dash.sql"]) {
+    const dir = tempDir();
+    copyFileSync(join(MIGRATIONS_DIR, "0001_links_and_daily_counts.sql"), join(dir, "0001_links_and_daily_counts.sql"));
+    writeFileSync(join(dir, misnamed), "CREATE TABLE extra (x);");
+    const db = new BetterSqlite3(":memory:");
+    expect(() => migrate(db, dir)).toThrow(/would never run/);
+    expect(tableNames(db)).toEqual([]);
+  }
+});
+
+test("two migrations with the same number are refused", () => {
+  const dir = tempDir();
+  copyFileSync(join(MIGRATIONS_DIR, "0001_links_and_daily_counts.sql"), join(dir, "0001_links_and_daily_counts.sql"));
+  writeFileSync(join(dir, "0001_again.sql"), "CREATE TABLE extra (x);");
+  const db = new BetterSqlite3(":memory:");
+  expect(() => migrate(db, dir)).toThrow(/no gap or repeat/);
+  expect(tableNames(db)).toEqual([]);
 });
 
 test("a migration that fails leaves the database at the version before it", () => {

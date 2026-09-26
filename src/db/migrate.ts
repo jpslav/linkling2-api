@@ -13,18 +13,27 @@ interface Migration {
 }
 
 function listMigrations(dir: string): Migration[] {
-  const migrations = readdirSync(dir)
-    .flatMap((file) => {
-      const match = MIGRATION_FILE.exec(file);
-      return match ? [{ version: Number(match[1]), file }] : [];
-    })
-    .sort((a, b) => a.version - b.version);
+  const migrations: Migration[] = [];
+  for (const file of readdirSync(dir)) {
+    const match = MIGRATION_FILE.exec(file);
+    if (match) {
+      migrations.push({ version: Number(match[1]), file });
+    } else if (file.endsWith(".sql")) {
+      // A misnamed migration would otherwise never run, and start-up would still succeed.
+      throw new Error(`${file} is not named NNNN_<what>.sql, so it would never run`);
+    }
+  }
+  migrations.sort((a, b) => a.version - b.version);
   migrations.forEach((m, i) => {
     if (m.version !== i + 1) {
       throw new Error(`migrations must be numbered 0001 upwards with no gap or repeat; found ${m.file} at position ${i + 1}`);
     }
   });
   return migrations;
+}
+
+function userVersion(db: Database): number {
+  return db.pragma("user_version", { simple: true }) as number;
 }
 
 /**
@@ -35,19 +44,25 @@ function listMigrations(dir: string): Migration[] {
  */
 export function migrate(db: Database, dir: string = MIGRATIONS_DIR): number[] {
   const migrations = listMigrations(dir);
-  const current = db.pragma("user_version", { simple: true }) as number;
   const latest = migrations.length;
-  if (current > latest) {
-    throw new Error(`database is at migration ${current} but this code knows only up to ${latest}`);
-  }
+  const checkVersion = (current: number): void => {
+    if (current < 0 || current > latest) {
+      throw new Error(`database is at migration ${current} but this code knows only 0 to ${latest}`);
+    }
+  };
+  checkVersion(userVersion(db));
   const applied: number[] = [];
-  for (const m of migrations.slice(current)) {
-    const sql = readFileSync(`${dir}/${m.file}`, "utf8");
+  for (const m of migrations) {
+    // IMMEDIATE takes the write lock before reading the version, so a second process
+    // starting at the same moment waits and then sees this migration as already done.
     db.transaction(() => {
-      db.exec(sql);
+      const current = userVersion(db);
+      checkVersion(current);
+      if (current >= m.version) return;
+      db.exec(readFileSync(`${dir}/${m.file}`, "utf8"));
       db.pragma(`user_version = ${m.version}`);
-    })();
-    applied.push(m.version);
+      applied.push(m.version);
+    }).immediate();
   }
   return applied;
 }
