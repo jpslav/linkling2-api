@@ -15,8 +15,8 @@
 # Exits 0 printing CLI E2E PASS, 1 printing CLI E2E FAIL: <the step> when a step's result is
 # not what it should be, and 2 printing CLI E2E BLIND: <what was missing> when nothing could be
 # measured: no `linkling` on PATH, no LINKLING_BASE or LINKLING_KEY, a service whose /-/health
-# does not answer 200 within 5 s, or a stack that already has a link called cli-test. A missing
-# stack is never a pass.
+# does not answer 200 within 5 s, a key the service refuses (a first `linkling list` exiting 3), or
+# a stack that already has a link called cli-test. A missing stack is never a pass.
 set -u
 
 blind() {
@@ -59,7 +59,14 @@ trap 'for n in $owned; do linkling delete "$n" >/dev/null 2>&1; done' EXIT
 
 # 0. R-015's line fixes the name `cli-test`. A link already called that is not this script's to
 # delete, and the line would fail on it with a 409, which says nothing about the command.
-listing=$(linkling list 2>&1) || fail "linkling list, before anything is made: $listing"
+listing=$(linkling list 2>&1)
+got=$?
+case "$got" in
+  0) ;;
+  # The key was refused, the environment is wrong or nothing answered: no step could be measured.
+  2 | 3 | 4) blind "linkling list, before anything is made, exited $got: $listing" ;;
+  *) fail "linkling list, before anything is made, exited $got: $listing" ;;
+esac
 if printf '%s\n' "$listing" | grep -q '^cli-test '; then
   blind "a link named cli-test is already on $LINKLING_BASE; R-015's line makes it, so delete it or use a fresh stack"
 fi

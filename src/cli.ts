@@ -92,7 +92,7 @@ interface Settings {
 }
 
 /** LINKLING_BASE and LINKLING_KEY, or the usage error saying which is wrong. */
-function settings(io: CliIo): Settings {
+export function settings(io: CliIo): Settings {
   const given = io.env["LINKLING_BASE"];
   if (given === undefined || given === "") {
     throw usageError("LINKLING_BASE is not set; set it to where the service answers, such as http://localhost:8080");
@@ -128,8 +128,12 @@ function madeBy(io: CliIo, by: string | undefined): string {
 /** Why a request got no answer, in a few words. */
 function reason(err: unknown, timeoutMs: number): string {
   if (err instanceof Error && err.name === "TimeoutError") return `no answer within ${timeoutMs / 1000} s`;
-  const cause = (err instanceof Error ? err.cause : undefined) as { code?: string; errors?: { code?: string }[] } | undefined;
-  return cause?.code ?? cause?.errors?.[0]?.code ?? (err instanceof Error ? err.message : String(err));
+  const cause = (err instanceof Error ? err.cause : undefined) as
+    | { code?: string; errors?: { code?: string }[]; message?: string }
+    | undefined;
+  // `fetch failed` says nothing; the cause does, even without a code (`bad port` for a port fetch refuses).
+  const said = err instanceof Error ? err.message : String(err);
+  return cause?.code ?? cause?.errors?.[0]?.code ?? cause?.message ?? said;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
@@ -198,7 +202,10 @@ async function call(s: Settings, method: string, path: string, expect: 200 | 201
     json = undefined;
   }
   if (status >= 300 && status < 400) {
-    throw new Failure(EXIT.noAnswer, `${s.base} answered ${status}, a redirect; set LINKLING_BASE to where it redirects to`);
+    throw new Failure(
+      EXIT.noAnswer,
+      `${s.base} answered ${status}, which Linkling's API never sends; if it is redirecting, set LINKLING_BASE to where it redirects to`,
+    );
   }
   if (status === 401) throw new Failure(EXIT.key, "the service refused LINKLING_KEY (401); check the team key");
   if (status === expect) {
@@ -212,13 +219,19 @@ async function call(s: Settings, method: string, path: string, expect: 200 | 201
   throw new Failure(status >= 400 && status < 500 ? EXIT.refused : EXIT.noAnswer, `${said} (${status})`);
 }
 
+// East Asian Wide and Fullwidth characters and emoji shown as pictures take two terminal columns;
+// combining marks and format characters such as the zero-width joiner take none. A made-by name
+// can hold any of them (ADR-0013), and a cell's length in characters is not its width on screen.
+const WIDE = /[ᄀ-ᅟ⺀-꓏가-힣豈-﫿︰-﹯＀-｠￠-￦\u{20000}-\u{3fffd}]|\p{Emoji_Presentation}/u;
+const NO_WIDTH = /[\p{M}\p{Cf}]/u;
+const columns = (text: string): number =>
+  [...text].reduce((sum, char) => sum + (NO_WIDTH.test(char) ? 0 : WIDE.test(char) ? 2 : 1), 0);
+
 /** Left-aligned columns, two spaces apart; the last is never padded, so a long URL stays whole. */
 function table(rows: string[][]): string {
-  // Widths in characters, not UTF-16 units, so an emoji in a made-by name takes one column.
-  const width = (cell: string): number => [...cell].length;
-  const widths = rows[0]!.map((_, i) => Math.max(...rows.map((row) => width(row[i]!))));
+  const widths = rows[0]!.map((_, i) => Math.max(...rows.map((row) => columns(row[i]!))));
   const line = (row: string[]): string =>
-    row.map((cell, i) => (i === row.length - 1 ? cell : cell + " ".repeat(widths[i]! - width(cell)))).join("  ");
+    row.map((cell, i) => (i === row.length - 1 ? cell : cell + " ".repeat(widths[i]! - columns(cell)))).join("  ");
   return rows.map((row) => `${line(row)}\n`).join("");
 }
 
@@ -270,8 +283,8 @@ async function run(argv: readonly string[], io: CliIo): Promise<number> {
 
   const s = settings(io);
   const shortLink = (link: LinkJson): string => `${s.base}/${link.name}`;
-  const linkFrom = (answer: unknown): LinkJson => {
-    if (!isLink(answer)) throw notLinkling(s.base, 200);
+  const linkFrom = (answer: unknown, status: number): LinkJson => {
+    if (!isLink(answer)) throw notLinkling(s.base, status);
     return answer;
   };
 
@@ -283,7 +296,7 @@ async function run(argv: readonly string[], io: CliIo): Promise<number> {
       if (name !== undefined) body["name"] = name;
       if (expires !== undefined) body["expires"] = expires;
       const answer = await call(s, "POST", "/-/api/links", 201, body);
-      const link = linkFrom(answer);
+      const link = linkFrom(answer, 201);
       if (json) printJson(answer);
       else io.stdout(`${shortLink(link)}\n`);
       return EXIT.ok;
@@ -302,7 +315,7 @@ async function run(argv: readonly string[], io: CliIo): Promise<number> {
     }
     case "edit": {
       const answer = await call(s, "PATCH", linkPath(arg(0)), 200, { url: arg(1) });
-      const link = linkFrom(answer);
+      const link = linkFrom(answer, 200);
       if (json) printJson(answer);
       else io.stdout(`${shortLink(link)} -> ${link.url}\n`);
       // The API answers 200 for an expired link, and editing it does not revive it.
@@ -344,16 +357,22 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
 }
 
 if (import.meta.main) {
-  // `linkling list | head -1` closes the pipe early; that is the reader's choice, not an error.
-  // The same goes for a closed stderr, which would otherwise end a run that worked with exit 1.
+  // `linkling list | head -1` closes the pipe early; that is the reader's choice, not an error, and
+  // the same goes for a closed stderr. Any other failure to write (stdout opened read-only, say) is
+  // ours, never the service saying no: exit 70, not the 1 an uncaught error would end with.
+  let unwritable = false;
   for (const stream of [process.stdout, process.stderr]) {
     stream.on("error", (err: NodeJS.ErrnoException) => {
-      if (err.code !== "EPIPE") throw err;
+      if (err.code === "EPIPE") return;
+      unwritable = true;
+      process.exitCode = EXIT.bug;
+      if (stream === process.stdout) process.stderr.write(`linkling: cannot write output: ${err.code ?? err.message}\n`);
     });
   }
-  process.exitCode = await runCli(process.argv.slice(2), {
+  const code = await runCli(process.argv.slice(2), {
     env: process.env,
     stdout: (text) => void process.stdout.write(text),
     stderr: (text) => void process.stderr.write(text),
   });
+  process.exitCode = unwritable ? EXIT.bug : code;
 }

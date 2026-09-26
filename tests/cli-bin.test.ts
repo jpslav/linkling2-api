@@ -105,6 +105,14 @@ describe("dist/cli.js", () => {
     expect(await exitWithClosedPipe("stdout", ["list"], processEnv)).toBe(0);
   });
 
+  test("output that cannot be written is exit 70 with its own line, never the 1 that means the service said no", async () => {
+    // `1</dev/null` opens stdout read-only, so writing to it fails with EBADF, not EPIPE.
+    const ran = await exec("bash", ["-c", `"${process.execPath}" "${built}" --help 1</dev/null`], { PATH: PATH() });
+    expect(ran.code).toBe(EXIT.bug);
+    expect(ran.out).toBe("");
+    expect(ran.err).toBe("linkling: cannot write output: EBADF\n");
+  });
+
   test("R-015: the verify line, run under bash with linkling on PATH, exits 0 and does all five things", async () => {
     const { app, base, env } = await stack();
     const ran = await exec("bash", ["-o", "pipefail", "-c", R015], { PATH: PATH(), ...(env as Record<string, string>) });

@@ -6,9 +6,10 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { EXIT, TIMEOUT_MS } from "../src/cli.js";
+import { EXIT, TIMEOUT_MS, settings } from "../src/cli.js";
 import { MADE, seed } from "./support/app.js";
 import { linkling, stack } from "./support/cli.js";
+import { TEST_KEY } from "./support/team-key.js";
 
 const NOW = () => MADE;
 
@@ -136,14 +137,21 @@ describe("R-015 a team member does all of it from the command line", () => {
     expect(edited.err).toBe("linkling: note: old has expired; changing its target does not bring it back\n");
   });
 
-  test("list lines its columns up by characters, so an emoji in a made-by name does not push them", async () => {
+  test("list lines its columns up as a terminal shows them: an emoji or a Chinese character takes two columns", async () => {
     const { app, run } = await stack({ now: NOW });
     seed(app.links, "party", "https://example.com/p", null, { madeBy: "🎉" });
     seed(app.links, "plain", "https://example.com/q", null, { madeBy: "sam" });
-    const rows = (await run(["list"])).out.trimEnd().split("\n");
-    const start = (row: string): number => [...row.slice(0, row.indexOf("never"))].length;
-    expect(rows).toHaveLength(3);
-    expect(start(rows[1]!)).toBe(start(rows[2]!));
+    seed(app.links, "cjk", "https://example.com/r", null, { madeBy: "山田" });
+    seed(app.links, "accent", "https://example.com/s", null, { madeBy: "é" });
+    const out = (await run(["list"])).out;
+    // NAME is 6 wide (accent), MADE BY is 7 (its own heading): each cell is padded to that in
+    // terminal columns, then two spaces. The spaces below are counted by hand from the widths:
+    // 🎉 is 2 columns (5 + 2 = 7 spaces), sam is 3 (4 + 2 = 6), 山田 is 4 (3 + 2 = 5), and an e with a
+    // combining accent is 1 (6 + 2 = 8).
+    expect(out).toContain("party   🎉       never");
+    expect(out).toContain("plain   sam      never");
+    expect(out).toContain("cjk     山田     never");
+    expect(out).toContain("accent  é        never");
   });
 
   test("a name is folded to lower case, as the API folds it", async () => {
@@ -356,12 +364,29 @@ describe("no usable answer: exit 4, never 0", () => {
     }
   });
 
-  test("the wait is TIMEOUT_MS, 10 s, unless a test shortens it", async () => {
-    const double = answering(() => new Response(JSON.stringify({ links: [] }), { status: 200 }));
+  test("the wait is 10 s unless a test shortens it, and the wait a request is given comes from settings", () => {
+    const env = { LINKLING_BASE: "http://localhost:8080", LINKLING_KEY: TEST_KEY };
+    expect(TIMEOUT_MS).toBe(10_000);
+    expect(settings({ env, stdout: () => {}, stderr: () => {} }).timeoutMs).toBe(TIMEOUT_MS);
+    expect(settings({ env, stdout: () => {}, stderr: () => {}, timeoutMs: 300 }).timeoutMs).toBe(300);
+  });
+
+  test("a port fetch refuses is said to be refused, not just 'fetch failed'", async () => {
     const { run } = await stack();
-    await run(["list"], {}, { fetch: double.fetch });
-    const signal = double.asked[0]!.init.signal as AbortSignal;
-    expect([TIMEOUT_MS, signal.aborted]).toEqual([10_000, false]);
+    // 6000 is on the list of ports fetch will not connect to, so this needs no server and no wait.
+    const ran = await run(["list"], { LINKLING_BASE: "http://127.0.0.1:6000" });
+    expect(ran).toEqual({ code: EXIT.noAnswer, out: "", err: "linkling: cannot reach http://127.0.0.1:6000: bad port\n" });
+  });
+
+  test("an answer to make that is not a link says which status it came with", async () => {
+    const double = answering(() => new Response("{}", { status: 201 }));
+    const { base, run } = await stack();
+    const ran = await run(["make", "https://example.com/a"], {}, { fetch: double.fetch });
+    expect(ran).toEqual({
+      code: EXIT.noAnswer,
+      out: "",
+      err: `linkling: ${base} answered 201, but not the way Linkling's API does; is LINKLING_BASE right?\n`,
+    });
   });
 
   test("every request is bearer-authenticated, is never redirected, and can be given up on", async () => {
@@ -382,7 +407,7 @@ describe("no usable answer: exit 4, never 0", () => {
     expect(ran).toEqual({
       code: EXIT.noAnswer,
       out: "",
-      err: `linkling: ${base} answered 301, a redirect; set LINKLING_BASE to where it redirects to\n`,
+      err: `linkling: ${base} answered 301, which Linkling's API never sends; if it is redirecting, set LINKLING_BASE to where it redirects to\n`,
     });
   });
 
