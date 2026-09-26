@@ -120,8 +120,8 @@ After a `git pull`, `npm run build` refreshes the installed command (run `npm ci
 on any command, prints the service's answer as one line of JSON, unchanged
 ([ADR-0013](docs/adr/0013-team-api.md)'s link, `{"links": [...]}` or `{"name", "total", "days"}`);
 for `delete` it prints `{"name": "<name>", "deleted": true}`. An error goes to stderr, its
-first line beginning `linkling: ` (a wrong command line adds the usage after it), and stdout
-carries only results.
+first line beginning `linkling: ` (a missing or unknown command adds the usage after it), and
+stdout carries only results.
 
 | Exit | Means |
 |---|---|

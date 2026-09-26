@@ -60,7 +60,7 @@ checks only its own environment and arguments: the argument count, a blank `--by
 
 The one answer with nothing in it to check is a `204` to a `delete`, which is taken as done
 whoever sends it (`tests/cli.test.ts`). An error goes to stderr, its first line beginning
-`linkling: ` (a wrong command line adds the usage after it); stdout carries only results.
+`linkling: ` (a missing or unknown command adds the usage after it); stdout carries only results.
 
 Rejected:
 
@@ -84,8 +84,8 @@ Rejected:
   without loading the service (`tests/cli.test.ts` walks its imports). It is installed with
   `npm ci && npm run build && npm install -g .`: npm links the package folder, so the build must
   stay in place, and there is no `prepare` script because `Dockerfile` runs `npm ci` (line 13)
-  before it copies `src` (line 15), where a `prepare: tsc` fails: `npm ci` exits 1 in a
-  directory holding only `package.json` and the lockfile.
+  before it copies `src` (line 15), and a `prepare: tsc` makes `npm ci` exit 1 in a directory
+  holding only `package.json` and the lockfile.
 - `tests/cli.test.ts`, `tests/cli-bin.test.ts` and `tests/made-by.test.ts` exercise the above;
   `scripts/cli-e2e.sh` checks it against a running stack.
 - A team that fronts the service on a path (`https://host/linkling/`) cannot use it: the
