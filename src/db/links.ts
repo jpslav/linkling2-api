@@ -73,6 +73,28 @@ export function getLinkByName(db: Database, name: string): Link | undefined {
   return row === undefined ? undefined : toLink(row);
 }
 
+/** Every link, newest first. */
+export function listLinks(db: Database): Link[] {
+  return db
+    .prepare<[], LinkRow>("SELECT id, name, target, made_by, created_at, expires_at FROM links ORDER BY id DESC")
+    .all()
+    .map(toLink);
+}
+
+/**
+ * Points the link at a new target and changes nothing else: its name, maker, expiry and
+ * counts stay (ADR-0001). Returns the link as it now is, or undefined when there is none.
+ */
+export function setTarget(db: Database, name: string, target: string): Link | undefined {
+  const row = db
+    .prepare<[string, string], LinkRow>(
+      `UPDATE links SET target = ? WHERE name = ?
+       RETURNING id, name, target, made_by, created_at, expires_at`,
+    )
+    .get(target, name);
+  return row === undefined ? undefined : toLink(row);
+}
+
 /**
  * Deletes the link's row and nothing else: its daily counts stay under its id, which
  * AUTOINCREMENT never hands to another link (ADR-0003, ADR-0004). Returns whether a

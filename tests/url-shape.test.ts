@@ -1,16 +1,28 @@
 // The shape of a printed link (ADR-0001). Changing anything pinned here breaks links
 // that are already on posters and slides.
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { buildApp } from "../src/app.js";
 import { MADE_UP_ALPHABET, MADE_UP_LENGTH, normalizeName } from "../src/names.js";
-import { MemoryLinks } from "./support/memory-links.js";
+import { apiCall, appWith as sqliteApp, linkTo, tempLinks } from "./support/app.js";
 import { TEST_KEY } from "./support/team-key.js";
 
 const TARGET = "https://example.com/q3";
 
-function appWith(links = new MemoryLinks().make("q3-plan", TARGET)) {
+function appWith(links = linkTo("q3-plan", TARGET)) {
   return { app: buildApp({ links, key: TEST_KEY }), links };
 }
+
+// The verify line selects this with -t 'case folding'; keep that phrase in the name.
+test("case folding: a link made as Q3-Plan is stored as q3-plan and opened by either", async () => {
+  const app = sqliteApp();
+  const made = await apiCall(app, "POST", "/-/api/links", { url: TARGET, name: "Q3-Plan" });
+  expect([made.statusCode, made.json().name]).toEqual([201, "q3-plan"]);
+  expect(app.links.get("q3-plan")?.name).toBe("q3-plan");
+  for (const url of ["/Q3-PLAN", "/q3-plan", "/Q3-plan"]) {
+    const res = await app.inject({ method: "GET", url });
+    expect([url, res.statusCode, res.headers.location]).toEqual([url, 302, TARGET]);
+  }
+});
 
 test("case folding: /Q3-PLAN and /q3-plan redirect to the same Location", async () => {
   const { app } = appWith();
@@ -55,7 +67,7 @@ describe("R-026 shape lock", () => {
   });
 
   test("every service route starts with /-/", async () => {
-    const app = buildApp({ links: new MemoryLinks(), key: TEST_KEY });
+    const app = buildApp({ links: tempLinks(), key: TEST_KEY });
     // A later item's route under /-/ is accepted; one at the root is refused when made.
     app.get("/-/probe", async () => "ok");
     app.post("/-/api/probe", async () => "ok");
@@ -85,10 +97,11 @@ describe("R-026 shape lock", () => {
 
   test("a name starting with - is refused", async () => {
     expect(normalizeName("-x")).toBeNull();
-    const { app, links } = appWith(new MemoryLinks().make("-x", TARGET));
+    const { app, links } = appWith(linkTo("-x", TARGET));
+    const lookup = vi.spyOn(links, "lookup");
     const res = await app.inject({ method: "GET", url: "/-x" });
     expect(res.statusCode).toBe(404);
-    expect(links.lookups).toBe(0);
+    expect(lookup).not.toHaveBeenCalled();
   });
 
   test("trailing slash opens the same link", async () => {

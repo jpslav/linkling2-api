@@ -1,16 +1,32 @@
 // The HTTP service. Later items register their routes on the instance buildApp returns,
 // always under `/-/` (ADR-0001): everything else at the root is a short name.
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
-import { isExpired, type Link, type LinkLookup } from "./links.js";
-import { normalizeName } from "./names.js";
+import { registerApi, sendJson } from "./api.js";
+import { isExpired, type Link } from "./links.js";
+import { normalizeName, type RandomIndex } from "./names.js";
+import type { LinkStore } from "./store.js";
 import { KEY_CHALLENGE, keyChecker, keyFromAuthorization } from "./team-key.js";
 
 export interface AppDeps {
-  links: LinkLookup;
+  links: LinkStore;
   /** The one team key (ADR-0005). Every `/-/` route but those in OPEN asks for it. */
   key: string;
   now?: () => Date;
+  /**
+   * Where the service's own lines go. It is only ever handed a method, a route pattern and
+   * a status (ADR-0004): never a URL, a header, an address or a store's error message.
+   */
+  log?: (line: string) => void;
+  /** The source of made-up names; a cryptographic one unless a test scripts it. */
+  randomIndex?: RandomIndex;
 }
+
+// What a client error on the API says. Fastify's own messages can quote the request back.
+const CLIENT_ERRORS: Record<number, string> = {
+  400: "the body is not valid JSON",
+  413: "the body is too large",
+  415: "send the body as application/json",
+};
 
 // The only `/-/` routes that answer without the team key. Adding one here decides that
 // anyone who can reach the service may call it.
@@ -31,7 +47,13 @@ function plainPage(reply: FastifyReply, status: number, text: string): FastifyRe
     .send(`${text}\n`);
 }
 
-export function buildApp({ links, key, now = () => new Date() }: AppDeps): FastifyInstance {
+export function buildApp({
+  links,
+  key,
+  now = () => new Date(),
+  log = (line) => console.error(line),
+  randomIndex,
+}: AppDeps): FastifyInstance {
   const isTeamKey = keyChecker(key);
 
   const app = Fastify({
@@ -76,15 +98,27 @@ export function buildApp({ links, key, now = () => new Date() }: AppDeps): Fasti
 
   app.get<{ Params: { name: string } }>("/:name", async (request, reply) => {
     const name = normalizeName(request.params.name);
+    const at = now();
     let link: Link | null;
     try {
       link = name === null ? null : await links.lookup(name);
     } catch {
-      // Whatever the store says went wrong is not the clicker's to read.
+      // Whatever the store says went wrong is not the clicker's to read, and its message is
+      // not logged either: it can carry anything the store was handed (ADR-0004).
+      log(`linkling: ${request.method} /:name answered 500`);
       return plainPage(reply, 500, "Something went wrong.");
     }
     if (link === null) return plainPage(reply, 404, "No such link.");
-    if (isExpired(link, now())) return plainPage(reply, 410, "This link has expired.");
+    if (isExpired(link, at)) return plainPage(reply, 410, "This link has expired.");
+    // Only a followed GET counts; HEAD runs this same handler and does not (R-029).
+    if (request.method === "GET") {
+      try {
+        await links.countFollow(link.id, at);
+      } catch {
+        // The clicker still gets their link; the tally is the team's loss, and says so.
+        log("linkling: GET /:name count not written");
+      }
+    }
     // The request's query string is deliberately not passed on (ADR-0001).
     return reply.code(302).headers(UNCACHED).header("location", link.target).send();
   });
@@ -93,6 +127,22 @@ export function buildApp({ links, key, now = () => new Date() }: AppDeps): Fasti
 
   // Says the process is up and nothing more: no link, count, key or store state.
   app.get("/-/health", async (_request, reply) => plainPage(reply, 200, "ok"));
+
+  registerApi(app, { links, now, randomIndex });
+
+  // Anything a handler throws, and anything Fastify refuses before one runs (a body that is
+  // not JSON, say). A server fault is logged as its method, route pattern and status only.
+  app.setErrorHandler((error: { statusCode?: number }, request, reply) => {
+    const code = error.statusCode;
+    const status = code !== undefined && code >= 400 && code < 500 ? code : 500;
+    const route = request.routeOptions.url;
+    if (status === 500) log(`linkling: ${request.method} ${route ?? "(no route)"} answered 500`);
+    if (route?.startsWith("/-/api/")) {
+      const error = status === 500 ? "Something went wrong." : (CLIENT_ERRORS[status] ?? "the request could not be read");
+      return sendJson(reply, status, { error });
+    }
+    return plainPage(reply, status, status === 500 ? "Something went wrong." : "Bad request.");
+  });
 
   app.setNotFoundHandler(async (_request, reply) => plainPage(reply, 404, "No such link."));
 
