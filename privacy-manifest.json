@@ -1,0 +1,55 @@
+{
+  "about": "Everything the Linkling service stores, and for how long (ADR-0004, ADR-0011). tests/privacy-manifest.test.ts fails unless the fields below are exactly the database's columns; linkling-web's privacy page carries every what, kept, counted and logged text below word for word, and its checks/privacy-matches-service.sh fails when it does not.",
+  "stored": [
+    {
+      "id": "link-name",
+      "fields": ["links.name"],
+      "what": "A link's short name",
+      "kept": "Until the link is deleted"
+    },
+    {
+      "id": "link-target",
+      "fields": ["links.target"],
+      "what": "The address the link sends people to",
+      "kept": "Until the link is deleted"
+    },
+    {
+      "id": "link-maker",
+      "fields": ["links.made_by"],
+      "what": "The name the link's maker gave for themselves",
+      "kept": "Until the link is deleted"
+    },
+    {
+      "id": "link-created",
+      "fields": ["links.created_at"],
+      "what": "When the link was made",
+      "kept": "Until the link is deleted"
+    },
+    {
+      "id": "link-expiry",
+      "fields": ["links.expires_at"],
+      "what": "When the link stops working, if its maker gave it an end",
+      "kept": "Until the link is deleted"
+    },
+    {
+      "id": "link-number",
+      "fields": ["links.id"],
+      "what": "An internal number for the link",
+      "kept": "Until the link is deleted; its daily counts keep the number after that"
+    },
+    {
+      "id": "daily-counts",
+      "fields": ["daily_counts.link_id", "daily_counts.day", "daily_counts.count"],
+      "what": "For each link and each day (in UTC), how many times the link was followed that day",
+      "kept": "Forever, even after the link is deleted. A deleted link's counts stay under its internal number, tied to no name, and are shown nowhere"
+    },
+    {
+      "id": "highest-number",
+      "fields": ["sqlite_sequence.name", "sqlite_sequence.seq"],
+      "what": "The highest internal link number handed out so far, so that no number is used twice",
+      "kept": "Forever"
+    }
+  ],
+  "counted": "A link's count for the day goes up by one each time the link sends someone on to its target. Chat apps fetch a pasted link once to show a preview, and that fetch counts too: telling it apart from a person would mean reading something about each visitor, which Linkling does not do.",
+  "logged": "The service writes no access log, and handling a request writes nothing about it to any log."
+}
