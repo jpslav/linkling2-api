@@ -1,4 +1,4 @@
-// What the team API accepts in a request body (ADR-0011), checked by hand rather than by
+// What the team API accepts in a request body (ADR-0012), checked by hand rather than by
 // Fastify's schema: its default Ajv drops unknown fields and coerces types, and a typo like
 // `expiry` should be refused, not silently ignored.
 import { normalizeName } from "./names.js";

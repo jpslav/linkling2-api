@@ -1,4 +1,4 @@
-// The team API under /-/api/ (ADR-0011): making, listing and reading links.
+// The team API under /-/api/ (ADR-0012): making, listing and reading links.
 import { describe, expect, test } from "vitest";
 import { MADE, apiCall, appWith, seed, tempLinks } from "./support/app.js";
 import { TEST_KEY } from "./support/team-key.js";

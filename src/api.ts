@@ -1,4 +1,4 @@
-// The team API (ADR-0011): make, list, read, edit and delete links, and read a link's daily
+// The team API (ADR-0012): make, list, read, edit and delete links, and read a link's daily
 // counts. Every route is under /-/api/, so the team-key guard in app.ts covers it.
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { parseEdit, parseMake } from "./api-input.js";

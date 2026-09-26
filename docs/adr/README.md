@@ -11,4 +11,5 @@
 | [0008](0008-third-party-services.md) | No third-party services, in the product or on the public site | Accepted |
 | [0009](0009-redirect-header-allowlist.md) | The redirect's response headers are an allowlist, pinned by a test | Accepted |
 | [0010](0010-migrations-user-version.md) | Migrations are numbered SQL files tracked by PRAGMA user_version, with no migrations table | Accepted |
+| [0012](0012-team-api.md) | The team API under /-/api/: routes, JSON fields and errors | Accepted |
 <!-- adr-index:end -->
