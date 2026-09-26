@@ -40,7 +40,7 @@ function schemaFields(db: Database): string[] {
   return tables
     .flatMap((t) =>
       db
-        .prepare<[string], { name: string }>("SELECT name FROM pragma_table_info(?)")
+        .prepare<[string], { name: string }>("SELECT name FROM pragma_table_xinfo(?)")
         .all(t)
         .map((c) => `${t}.${c.name}`),
     )
@@ -100,15 +100,20 @@ test("every entry has an id, fields and the text the privacy page copies", () =>
 test("a new column the manifest does not list, or an entry the schema lacks, is reported", () => {
   const dir = tempDir();
   for (const f of readdirSync(MIGRATIONS_DIR)) copyFileSync(join(MIGRATIONS_DIR, f), join(dir, f));
-  writeFileSync(join(dir, "0002_scratch.sql"), "ALTER TABLE links ADD COLUMN clicker_ip TEXT;\n");
+  writeFileSync(
+    join(dir, "0002_scratch.sql"),
+    "ALTER TABLE links ADD COLUMN clicker_ip TEXT;\n" +
+      // pragma_table_info leaves generated columns out; the pin must still see them.
+      "ALTER TABLE links ADD COLUMN target_start TEXT GENERATED ALWAYS AS (substr(target, 1, 8)) VIRTUAL;\n",
+  );
   const db = new BetterSqlite3(join(dir, "scratch.db"));
   try {
     migrate(db, dir);
     const manifest = readManifest();
-    expect(compare(db, manifest)).toEqual({ unlisted: ["links.clicker_ip"], absent: [] });
+    expect(compare(db, manifest)).toEqual({ unlisted: ["links.clicker_ip", "links.target_start"], absent: [] });
     const withoutTarget = { ...manifest, stored: manifest.stored.filter((e) => e.id !== "link-target") };
     const extra = { ...manifest, stored: [...manifest.stored, { id: "x", fields: ["links.referrer"], what: "x", kept: "x" }] };
-    expect(compare(db, withoutTarget).unlisted).toEqual(["links.clicker_ip", "links.target"]);
+    expect(compare(db, withoutTarget).unlisted).toEqual(["links.clicker_ip", "links.target", "links.target_start"]);
     expect(compare(db, extra).absent).toEqual(["links.referrer"]);
   } finally {
     db.close();

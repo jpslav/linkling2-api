@@ -14,6 +14,9 @@ import { tempDir } from "./temp-db.js";
 const CHILD = fileURLToPath(new URL("./support/follow-a-link.mjs", import.meta.url));
 const CANARY_CONSOLE = "follow-a-link: canary via console.log";
 const CANARY_FD = "follow-a-link: canary via fd 1";
+const CANARY_ERR_CONSOLE = "follow-a-link: canary via console.error";
+const CANARY_ERR_FD = "follow-a-link: canary via fd 2";
+const DONE = "follow-a-link: DONE [302,404,410,500,404,404,302,400]";
 
 // Strings nothing else in the app, the database or the output could contain by chance.
 const clicker = {
@@ -22,7 +25,7 @@ const clicker = {
   referrer: "https://referrer.example/canary-ref-8c2d",
 };
 
-function follow(): { output: string; dbBytes: Buffer; status: number | null } {
+function follow(): { stdout: string; stderr: string; dbBytes: Buffer; status: number | null } {| null } {
   const dir = tempDir();
   const dbPath = join(dir, "linkling.db");
   const run = spawnSync(process.execPath, [CHILD, dbPath, JSON.stringify(clicker)], {
@@ -34,31 +37,37 @@ function follow(): { output: string; dbBytes: Buffer; status: number | null } {
   // normally folds the -wal file back into the main file and removes both.
   const files = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`].filter((f) => existsSync(f));
   return {
-    output: run.stdout + run.stderr,
+    stdout: run.stdout,
+    stderr: run.stderr,
     dbBytes: Buffer.concat(files.map((f) => readFileSync(f))),
     status: run.status,
   };
 }
 
 test("following links writes no log line and stores nothing about the clicker", () => {
-  const { output, dbBytes, status } = follow();
+  const { stdout, stderr, dbBytes, status } = follow();
+  const output = stdout + stderr;
 
   // Blind arms: if the capture or the scan saw nothing, the content checks below would
   // pass for the wrong reason.
-  expect(output, "blind: the console canary never reached the captured output").toContain(CANARY_CONSOLE);
-  expect(output, "blind: the fd 1 canary never reached the captured output").toContain(CANARY_FD);
+  expect(stdout, "blind: the console.log canary never reached the captured stdout").toContain(CANARY_CONSOLE);
+  expect(stdout, "blind: the fd 1 canary never reached the captured stdout").toContain(CANARY_FD);
+  expect(stderr, "blind: the console.error canary never reached the captured stderr").toContain(CANARY_ERR_CONSOLE);
+  expect(stderr, "blind: the fd 2 canary never reached the captured stderr").toContain(CANARY_ERR_FD);
   expect(dbBytes.length, "blind: the database files were empty or missing").toBeGreaterThan(0);
   expect(dbBytes.includes("https://example.com/q3"), "blind: the link's own target is not in the bytes read").toBe(true);
 
   expect(status, output).toBe(0);
   // Through inject: 302 for the link, 404 unknown, 410 expired, 500 store failure, 404 bad
   // escape, 404 /-/. Over a socket: 302 for the link, 400 for a request line that is not HTTP.
-  // A cookie on any response would appear in this line too.
-  expect(output).toContain('follow-a-link: DONE [302,404,410,500,404,404,302,400]');
+  // A cookie on any response, or a follow that wrote to the database, would appear in this
+  // line too.
+  expect(stdout).toContain(DONE);
 
-  // No request log: the child's own three lines are the whole output.
-  const lines = output.split("\n").filter((l) => l.length > 0);
-  expect(lines).toEqual([CANARY_CONSOLE, CANARY_FD, "follow-a-link: DONE [302,404,410,500,404,404,302,400]"]);
+  // No request log: the child's own lines are the whole output.
+  const lines = (s: string): string[] => s.split("\n").filter((l) => l.length > 0);
+  expect(lines(stdout)).toEqual([CANARY_CONSOLE, CANARY_FD, DONE]);
+  expect(lines(stderr)).toEqual([CANARY_ERR_CONSOLE, CANARY_ERR_FD]);
 
   for (const [what, value] of Object.entries(clicker)) {
     expect(output.includes(value), `the clicker's ${what} is in the service's output`).toBe(false);

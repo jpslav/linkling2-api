@@ -6,9 +6,9 @@
 //
 //   node follow-a-link.mjs <database-path> <json: { address, userAgent, referrer }>
 //
-// It writes exactly three lines of its own: CANARY_CONSOLE through console.log, then
-// CANARY_FD straight to descriptor 1, both before the app exists, and last a DONE line
-// with the status codes it saw. Anything else in its output came from the app.
+// It writes exactly five lines of its own: a canary through console.log, one straight to
+// descriptor 1, one through console.error and one straight to descriptor 2, all before
+// the app exists, and last a DONE line with the status codes it saw. Anything else in its output came from the app.
 import { existsSync, writeSync } from "node:fs";
 import { request } from "node:http";
 import { connect } from "node:net";
@@ -17,6 +17,8 @@ import { fileURLToPath } from "node:url";
 
 const CANARY_CONSOLE = "follow-a-link: canary via console.log";
 const CANARY_FD = "follow-a-link: canary via fd 1";
+const CANARY_ERR_CONSOLE = "follow-a-link: canary via console.error";
+const CANARY_ERR_FD = "follow-a-link: canary via fd 2";
 
 // The sources import each other as ./x.js (NodeNext); Node strips the types but does not
 // map .js to .ts, so this does, for relative imports from a .ts file only.
@@ -35,6 +37,8 @@ const clicker = JSON.parse(clickerJson);
 
 console.log(CANARY_CONSOLE);
 writeSync(1, `${CANARY_FD}\n`);
+console.error(CANARY_ERR_CONSOLE);
+writeSync(2, `${CANARY_ERR_FD}\n`);
 
 const { buildApp } = await import("../../src/app.ts");
 const { openDatabase } = await import("../../src/db/open.ts");
@@ -57,7 +61,15 @@ const links = {
 };
 
 const app = buildApp({ links, key: "team-key-for-the-test", now: () => now });
-const headers = { "user-agent": clicker.userAgent, referer: clicker.referrer };
+// Behind a proxy the address arrives in a header, not as the socket's peer, so it is sent
+// in every header a proxy uses for it as well.
+const headers = {
+  "user-agent": clicker.userAgent,
+  referer: clicker.referrer,
+  "x-forwarded-for": clicker.address,
+  forwarded: `for=${clicker.address}`,
+  "x-real-ip": clicker.address,
+};
 const statuses = [];
 for (const url of ["/q3-plan", "/nope", "/old", "/boom", "/%zz", "/-/nothing-here"]) {
   const res = await app.inject({ method: "GET", url, remoteAddress: clicker.address, headers });
@@ -69,8 +81,8 @@ for (const url of ["/q3-plan", "/nope", "/old", "/boom", "/%zz", "/-/nothing-her
 
 // The same over a real socket, where Node's HTTP server is in the path too: one follow,
 // then a request line no server can parse, which goes through the client-error path
-// instead of a route. The address here is the loopback one, so only the browser and
-// referrer are canaries on this leg.
+// instead of a route. The socket's own address is the loopback one here, so on this leg
+// the clicker's address is only in the proxy headers.
 await app.listen({ host: "127.0.0.1", port: 0 });
 const { port } = app.server.address();
 statuses.push(
@@ -91,6 +103,12 @@ statuses.push(
   }),
 );
 await app.close();
+
+// Nothing a follow writes reaches the database yet, so the scan has nothing of a follow
+// to look at. When LL-007 makes follows count, this fails: build the app the way
+// src/server.ts does from then on, so the scan covers what a real follow writes.
+const counted = db.prepare("SELECT count(*) AS n FROM daily_counts").get().n;
+if (counted !== 0) statuses.push("counting is wired: build the app the way src/server.ts does");
 db.close();
 
 writeSync(1, `follow-a-link: DONE ${JSON.stringify(statuses)}\n`);
