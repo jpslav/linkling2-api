@@ -37,7 +37,9 @@ export function siteProblem(site: string | undefined): string | null {
     return problem;
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return problem;
-  if (url.username !== "" || url.password !== "" || url.search !== "" || url.hash !== "") return problem;
+  // `?` and `#` are tested on the text: URL reports an empty query or fragment as "", and
+  // either would swallow the `/privacy.html` appended after it.
+  if (url.username !== "" || url.password !== "" || /[?#]/.test(site)) return problem;
   return null;
 }
 

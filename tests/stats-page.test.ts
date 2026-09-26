@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 import { chromium } from "playwright";
 import { afterEach, describe, expect, test } from "vitest";
 import { utcDay } from "../src/db/links.js";
-import { DAYS, PRIVACY_FALLBACK } from "../src/stats.js";
+import { DAYS, PRIVACY_FALLBACK, sparkline } from "../src/stats.js";
 import type { SqliteLinks } from "../src/store.js";
 import { appWith, seed, tempLinks } from "./support/app.js";
 import { basic, bearer, TEST_KEY } from "./support/team-key.js";
@@ -88,6 +88,18 @@ describe("R-010 the stats page lists every link", () => {
     ]);
   });
 
+  test("the 14-day line runs oldest to newest, left to right, higher for busier days", () => {
+    const pointsOf = (svg: string) =>
+      /points="([^"]*)"/.exec(svg)![1]!.split(" ").map((xy) => xy.split(",").map(Number));
+    const line = pointsOf(sparkline([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 10]));
+    expect(line).toHaveLength(14);
+    expect(line.map(([x]) => x)[0]).toBe(0);
+    expect(line.map(([x]) => x)[13]).toBe(130);
+    // SVG y grows downward: the busiest day is at the top, a zero at the bottom.
+    expect([line[0]![1], line[12]![1], line[13]![1]]).toEqual([22, 12, 2]);
+    expect(pointsOf(sparkline(Array(14).fill(0))).map(([, y]) => y)).toEqual(Array(14).fill(22));
+  });
+
   test("names, targets and makers are shown as text, never as markup", async () => {
     const links = tempLinks();
     seed(links, "x", 'https://example.com/?q="><script>alert(1)</script>', null, { madeBy: "<img src=x onerror=alert(2)>" });
@@ -107,7 +119,9 @@ describe("R-010 the stats page lists every link", () => {
   test("the page loads nothing but its own stylesheet and script", async () => {
     const app = appWith(tempLinks(), { now: () => NOW });
     const res = await statsOf(app);
-    expect(res.headers["content-security-policy"]).toMatch(/^default-src 'none'; script-src 'self'; style-src 'self';/);
+    expect(res.headers["content-security-policy"]).toBe(
+      "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    );
     expect([...res.body.matchAll(/\b(?:src|href)="([^"#][^"]*)"/g)].map(([, url]) => url)).toEqual([
       "/-/stats.css",
       "/-/stats.js",
@@ -175,19 +189,23 @@ describe("R-011 filter, in a real browser", () => {
     for (const close of closers.splice(0).reverse()) await close();
   });
 
-  /** The page, with the app listening on a real port, in headless Chromium holding the key. */
-  async function openPage(links: SqliteLinks) {
+  /**
+   * The page, with the app listening on a real port, in headless Chromium holding the key.
+   * `host` is the name the browser uses: 127.0.0.1 is a secure context, and `linkling.test`,
+   * resolved to it here, is plain http on a LAN-style name, which is not.
+   */
+  async function openPage(links: SqliteLinks, host = "127.0.0.1") {
     const app = appWith(links, { now: () => NOW });
     await app.listen({ port: 0, host: "127.0.0.1" });
     closers.push(() => app.close());
-    const browser = await chromium.launch();
+    const browser = await chromium.launch({ args: ["--host-resolver-rules=MAP linkling.test 127.0.0.1"] });
     closers.push(() => browser.close());
     const context = await browser.newContext({ httpCredentials: { username: "", password: TEST_KEY } });
     const page = await context.newPage();
     const loaded: string[] = [];
     page.on("requestfinished", (request) => loaded.push(new URL(request.url()).pathname));
     const { port } = app.server.address() as AddressInfo;
-    await page.goto(`http://127.0.0.1:${port}/-/stats`);
+    await page.goto(`http://${host}:${port}/-/stats`);
     return { page, loaded, port };
   }
 
@@ -209,8 +227,13 @@ describe("R-011 filter, in a real browser", () => {
     expect((await visibleNames(page)).sort()).toEqual(["board", "q3-plan"]);
     await expect.poll(() => page.locator("#no-match").isVisible()).toBe(false);
 
+    // Only the target holds this, and only the short name holds the next two.
     await page.locator("#filter").fill("CALENDAR");
     expect(await visibleNames(page)).toEqual(["offsite"]);
+    await page.locator("#filter").fill("hjkm");
+    expect(await visibleNames(page)).toEqual(["hjkm4t"]);
+    await page.locator("#filter").fill("BOARD");
+    expect(await visibleNames(page)).toEqual(["board"]);
 
     await page.locator("#filter").fill("nothing-like-this");
     expect(await visibleNames(page)).toEqual([]);
@@ -228,5 +251,19 @@ describe("R-011 filter, in a real browser", () => {
     await page.locator("button.copy").click();
     await expect.poll(() => page.locator("button.copy").textContent()).toBe("Copied");
     expect(await page.evaluate("navigator.clipboard.readText()")).toBe(`http://127.0.0.1:${port}/q3-plan`);
+  }, 30_000);
+
+  test("Copy works over plain http on a LAN name too, where the Clipboard API is missing", async () => {
+    const links = tempLinks();
+    seed(links, "q3-plan", "https://docs.example.com/q3");
+    const { page, port } = await openPage(links, "linkling.test");
+    expect(await page.evaluate("[window.isSecureContext, typeof navigator.clipboard]")).toEqual([false, "undefined"]);
+    await page.locator("button.copy").click();
+    await expect.poll(() => page.locator("button.copy").textContent()).toBe("Copied");
+    // Read back from a secure page in the same browser, which can reach the clipboard.
+    const reader = await page.context().newPage();
+    await reader.goto(`http://127.0.0.1:${port}/-/stats`);
+    await page.context().grantPermissions(["clipboard-read"], { origin: `http://127.0.0.1:${port}` });
+    expect(await reader.evaluate("navigator.clipboard.readText()")).toBe(`http://linkling.test:${port}/q3-plan`);
   }, 30_000);
 });
