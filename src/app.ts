@@ -3,11 +3,18 @@
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import { isExpired, type Link, type LinkLookup } from "./links.js";
 import { normalizeName } from "./names.js";
+import { KEY_CHALLENGE, keyChecker, keyFromAuthorization } from "./team-key.js";
 
 export interface AppDeps {
   links: LinkLookup;
+  /** The one team key (ADR-0005). Every `/-/` route but those in OPEN asks for it. */
+  key: string;
   now?: () => Date;
 }
+
+// The only `/-/` routes that answer without the team key. Adding one here decides that
+// anyone who can reach the service may call it.
+const OPEN = new Set(["/-/health"]);
 
 // ADR-0002: nothing a browser may remember, and nothing that tells the target where the
 // click came from. The full header set a redirect may carry is ADR-0009's allowlist.
@@ -24,7 +31,9 @@ function plainPage(reply: FastifyReply, status: number, text: string): FastifyRe
     .send(`${text}\n`);
 }
 
-export function buildApp({ links, now = () => new Date() }: AppDeps): FastifyInstance {
+export function buildApp({ links, key, now = () => new Date() }: AppDeps): FastifyInstance {
+  const isTeamKey = keyChecker(key);
+
   const app = Fastify({
     // No request log: the default line carries the clicker's address (ADR-0006).
     logger: false,
@@ -49,6 +58,19 @@ export function buildApp({ links, now = () => new Date() }: AppDeps): FastifyIns
     }
   });
 
+  // The guard decides by the route that matched, never by the text of the URL: Fastify
+  // routes `/%2D/api/links` to `/-/api/links`, so a prefix test on request.url would let
+  // it through. Added before any route, it covers every route and plugin added later. A
+  // request that matched no route gets the plain 404; there is nothing there to guard.
+  app.addHook("onRequest", async (request, reply) => {
+    const route = request.routeOptions.url;
+    if (route === undefined || !route.startsWith("/-/") || OPEN.has(route)) return;
+    if (isTeamKey(keyFromAuthorization(request.headers.authorization))) return;
+    // One answer for no key and a wrong key alike.
+    reply.header("www-authenticate", KEY_CHALLENGE);
+    return plainPage(reply, 401, "The team key is needed.");
+  });
+
   app.get("/", async (_request, reply) => plainPage(reply, 200, "Linkling"));
 
   app.get<{ Params: { name: string } }>("/:name", async (request, reply) => {
@@ -67,6 +89,9 @@ export function buildApp({ links, now = () => new Date() }: AppDeps): FastifyIns
   });
 
   rootSealed = true;
+
+  // Says the process is up and nothing more: no link, count, key or store state.
+  app.get("/-/health", async (_request, reply) => plainPage(reply, 200, "ok"));
 
   app.setNotFoundHandler(async (_request, reply) => plainPage(reply, 404, "No such link."));
 
