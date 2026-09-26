@@ -61,7 +61,8 @@ export interface CountRow {
   count: number;
 }
 
-/** Every daily_counts row, in a fixed order. */
+/** Every daily_counts row, in a fixed order, once the tallied follows are written. */
 export function countRows(links: SqliteLinks): CountRow[] {
+  links.flushCounts();
   return links.db.prepare("SELECT link_id, day, count FROM daily_counts ORDER BY link_id, day").all() as CountRow[];
 }

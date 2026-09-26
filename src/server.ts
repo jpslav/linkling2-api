@@ -35,8 +35,27 @@ export async function main(env: NodeJS.ProcessEnv, io: StartIo): Promise<Fastify
 
 export interface Running {
   app: FastifyInstance;
-  /** Stops listening, then closes the database. */
+  /** Stops listening, writes the day's tallied follows, then closes the database. */
   close: () => Promise<void>;
+}
+
+// Five seconds past midnight UTC: late enough that the day being written is over.
+const FLUSH_AFTER_MIDNIGHT_MS = 5_000;
+
+/** How long from `now` until the next daily write of counts (ADR-0014). */
+export function msUntilFlush(now: Date): number {
+  const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) + FLUSH_AFTER_MIDNIGHT_MS;
+  return next - now.getTime();
+}
+
+/** Writes the tallied follows; a failure keeps them for the next write and says so. */
+function flush(links: SqliteLinks, stderr: (line: string) => void): void {
+  try {
+    links.flushCounts();
+  } catch {
+    // Nothing from the store's error: ADR-0004 logs a fault's place and nothing else.
+    stderr("linkling: daily counts not written; kept for the next write");
+  }
 }
 
 /**
@@ -53,6 +72,7 @@ export async function startService(env: NodeJS.ProcessEnv, stderr: (line: string
   }
   const dataDir = env.LINKLING_DATA ?? "data";
   let db: Database | undefined;
+  let links: SqliteLinks | undefined;
   let app: FastifyInstance | null;
   try {
     app = await main(env, {
@@ -64,7 +84,8 @@ export async function startService(env: NodeJS.ProcessEnv, stderr: (line: string
         } catch (err) {
           throw new Error(`linkling: could not open the database in ${dataDir}: ${(err as Error).message}`);
         }
-        return new SqliteLinks(db);
+        links = new SqliteLinks(db);
+        return links;
       },
       listen: { port, host: "0.0.0.0" },
     });
@@ -77,10 +98,23 @@ export async function startService(env: NodeJS.ProcessEnv, stderr: (line: string
     return null;
   }
   const running = app;
+  const store = links!;
+  // The day's follows are written once, just after it ends (ADR-0014).
+  let timer: NodeJS.Timeout;
+  const schedule = (): void => {
+    timer = setTimeout(() => {
+      flush(store, stderr);
+      schedule();
+    }, msUntilFlush(new Date()));
+    timer.unref();
+  };
+  schedule();
   return {
     app: running,
     close: async () => {
+      clearTimeout(timer);
       await running.close();
+      flush(store, stderr);
       db?.close();
     },
   };
