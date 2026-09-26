@@ -2,11 +2,12 @@
 import { describe, expect, test } from "vitest";
 import { buildApp } from "../src/app.js";
 import { MemoryLinks } from "./support/memory-links.js";
+import { TEST_KEY } from "./support/team-key.js";
 
 const NOW = new Date("2026-09-26T12:00:00Z");
 
 function appAt(links: MemoryLinks, now = NOW) {
-  return buildApp({ links, now: () => now });
+  return buildApp({ links, key: TEST_KEY, now: () => now });
 }
 
 function expectPlainPage(
@@ -74,6 +75,7 @@ describe("R-018 gone links", () => {
       links: {
         lookup: () => Promise.reject(new Error("SQLITE_BUSY at /data/linkling.db")),
       },
+      key: TEST_KEY,
     });
     expectPlainPage(await app.inject({ method: "GET", url: "/q3-plan" }), 500, "Something went wrong.\n");
   });

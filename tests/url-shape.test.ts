@@ -4,11 +4,12 @@ import { describe, expect, test } from "vitest";
 import { buildApp } from "../src/app.js";
 import { MADE_UP_ALPHABET, MADE_UP_LENGTH, normalizeName } from "../src/names.js";
 import { MemoryLinks } from "./support/memory-links.js";
+import { TEST_KEY } from "./support/team-key.js";
 
 const TARGET = "https://example.com/q3";
 
 function appWith(links = new MemoryLinks().make("q3-plan", TARGET)) {
-  return { app: buildApp({ links }), links };
+  return { app: buildApp({ links, key: TEST_KEY }), links };
 }
 
 test("case folding: /Q3-PLAN and /q3-plan redirect to the same Location", async () => {
@@ -54,7 +55,7 @@ describe("R-026 shape lock", () => {
   });
 
   test("every service route starts with /-/", async () => {
-    const app = buildApp({ links: new MemoryLinks() });
+    const app = buildApp({ links: new MemoryLinks(), key: TEST_KEY });
     // A later item's route under /-/ is accepted; one at the root is refused when made.
     app.get("/-/probe", async () => "ok");
     app.post("/-/api/probe", async () => "ok");

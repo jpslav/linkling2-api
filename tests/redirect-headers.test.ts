@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, test } from "vitest";
 import { buildApp } from "../src/app.js";
 import { MemoryLinks } from "./support/memory-links.js";
+import { bearer, TEST_KEY } from "./support/team-key.js";
 
 // ADR-0009: every header a live redirect may carry, as Node's own client (keep-alive by
 // default) receives them. Location, Cache-Control and Referrer-Policy are ADR-0002's;
@@ -30,13 +31,13 @@ interface Wire {
 }
 
 /** Follows a path over a real socket, as curl would, and reports what came back. */
-async function overTheWire(links: MemoryLinks, path: string): Promise<Wire> {
-  const app = buildApp({ links });
+async function overTheWire(links: MemoryLinks, path: string, headers: Record<string, string> = {}): Promise<Wire> {
+  const app = buildApp({ links, key: TEST_KEY });
   opened.push(app);
   await app.listen({ port: 0, host: "127.0.0.1" });
   const { port } = app.server.address() as AddressInfo;
   return new Promise((resolve, reject) => {
-    request({ host: "127.0.0.1", port, path, method: "GET" }, (res) => {
+    request({ host: "127.0.0.1", port, path, method: "GET", headers }, (res) => {
       res.resume();
       res.on("end", () =>
         resolve({ statusLine: `HTTP/${res.httpVersion} ${res.statusCode}`, headers: res.headers }),
@@ -57,7 +58,7 @@ describe("R-019 uncached redirect", () => {
 
   test("R-019: after delete, and after delete-and-remake, the next click gets the new answer", async () => {
     const links = new MemoryLinks().make("q3-plan", "https://example.com/old");
-    const app = buildApp({ links });
+    const app = buildApp({ links, key: TEST_KEY });
     const click = () => app.inject({ method: "GET", url: "/q3-plan" });
 
     expect((await click()).headers.location).toBe("https://example.com/old");
@@ -79,10 +80,32 @@ describe("R-019 uncached redirect", () => {
   });
 
   test("a HEAD request answers the same redirect", async () => {
-    const app = buildApp({ links: new MemoryLinks().make("q3-plan", "https://example.com/a") });
+    const app = buildApp({ links: new MemoryLinks().make("q3-plan", "https://example.com/a"), key: TEST_KEY });
     const res = await app.inject({ method: "HEAD", url: "/q3-plan" });
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe("https://example.com/a");
     expect(res.headers["cache-control"]).toBe("private, no-store");
+  });
+});
+
+describe("R-017 following a link asks nothing and leaves nothing behind", () => {
+  test("R-017: following a live link needs no key and sets no cookie", async () => {
+    const wire = await overTheWire(new MemoryLinks().make("q3-plan", "https://example.com/a"), "/q3-plan");
+    expect(wire.statusLine).toBe("HTTP/1.1 302");
+    expect(wire.headers.location).toBe("https://example.com/a");
+    expect(wire.headers["referrer-policy"]).toBe("no-referrer");
+    expect(wire.headers["set-cookie"]).toBeUndefined();
+    expect(wire.headers["www-authenticate"]).toBeUndefined();
+  });
+
+  test("R-017: a wrong key on a click is never consulted", async () => {
+    const wire = await overTheWire(
+      new MemoryLinks().make("q3-plan", "https://example.com/a"),
+      "/q3-plan",
+      bearer("not-the-key"),
+    );
+    expect(wire.statusLine).toBe("HTTP/1.1 302");
+    expect(wire.headers.location).toBe("https://example.com/a");
+    expect(wire.headers["set-cookie"]).toBeUndefined();
   });
 });
