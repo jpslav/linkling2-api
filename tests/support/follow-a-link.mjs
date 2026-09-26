@@ -61,6 +61,8 @@ for (const url of ["/q3-plan", "/nope", "/old", "/boom", "/%zz", "/-/nothing-her
   const res = await app.inject({ method: "GET", url, remoteAddress: clicker.address, headers });
   statuses.push(res.statusCode);
   if (url === "/q3-plan" && res.headers.location !== "https://example.com/q3") statuses.push("bad-location");
+  // The privacy page says the service sets no cookies.
+  if (res.headers["set-cookie"] !== undefined) statuses.push(`cookie on ${url}`);
 }
 await app.close();
 db.close();
