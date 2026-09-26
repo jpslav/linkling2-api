@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import { registerApi, sendJson } from "./api.js";
 import { isExpired, type Link } from "./links.js";
 import { normalizeName, type RandomIndex } from "./names.js";
+import { registerStats } from "./stats.js";
 import type { LinkStore } from "./store.js";
 import { KEY_CHALLENGE, keyChecker, keyFromAuthorization } from "./team-key.js";
 
@@ -14,6 +15,8 @@ export interface AppDeps {
   now?: () => Date;
   /** The source of made-up names; a cryptographic one unless a test scripts it. */
   randomIndex?: RandomIndex;
+  /** The public site's address (LINKLING_SITE), which the stats page links to; none yet by default. */
+  site?: string | undefined;
 }
 
 // A URL a client meant for the API, however it spelled the prefix: `/-/API/`, `/%2D/api/`.
@@ -51,6 +54,7 @@ export function buildApp({
   key,
   now = () => new Date(),
   randomIndex,
+  site,
 }: AppDeps): FastifyInstance {
   const isTeamKey = keyChecker(key);
 
@@ -147,6 +151,7 @@ export function buildApp({
   app.get("/-/health", async (_request, reply) => plainPage(reply, 200, "ok"));
 
   registerApi(app, { links, now, randomIndex });
+  registerStats(app, { links, now, site });
 
   // Anything a handler throws, and anything Fastify refuses before one runs (a body that is
   // not JSON, say). Nothing is logged, as above; a failing database shows as the 500s the

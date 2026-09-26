@@ -10,9 +10,8 @@ import { basic, bearer, TEST_KEY } from "./support/team-key.js";
 const CHALLENGE = 'Basic realm="Linkling", charset="UTF-8"';
 
 /**
- * The app at the two paths R-014's verify line calls: the real list route, and a stand-in
- * for the stats page (LL-008), registered after buildApp returns the way it will be.
- * `ran` counts the times either reached its store or handler.
+ * The app at the two paths R-014's verify line calls: the list route and the stats page.
+ * Both read the store's list, so `ran` counts the times either reached it.
  */
 function guarded() {
   const links = tempLinks();
@@ -23,12 +22,10 @@ function guarded() {
     return list();
   };
   const app = buildApp({ links, key: TEST_KEY });
-  app.get("/-/stats", async () => {
-    ran.count++;
-    return "the stats";
-  });
   return { app, ran };
 }
+
+const STATS_HEADING = "<h1>Linkling — our links</h1>";
 
 function expectRefused(res: LightMyRequestResponse): void {
   expect(res.statusCode).toBe(401);
@@ -76,16 +73,15 @@ describe("R-014 the team key", () => {
     ];
     for (const headers of right) {
       const res = await app.inject({ method: "GET", url: "/-/stats", headers });
-      expect([res.statusCode, res.body]).toEqual([200, "the stats"]);
+      expect([res.statusCode, res.body.includes(STATS_HEADING)]).toEqual([200, true]);
     }
     expect(ran.count).toBe(right.length);
   });
 
   test("R-014: a Basic password holding a colon is the whole key", async () => {
     const app = buildApp({ links: tempLinks(), key: "a:b" });
-    app.get("/-/stats", async () => "the stats");
     const res = await app.inject({ method: "GET", url: "/-/stats", headers: basic("ana", "a:b") });
-    expect(res.statusCode).toBe(200);
+    expect([res.statusCode, res.body.includes(STATS_HEADING)]).toEqual([200, true]);
   });
 
   test("R-014: an encoded path that routes to a guarded route is still refused", async () => {

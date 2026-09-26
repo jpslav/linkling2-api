@@ -15,4 +15,5 @@
 | [0012](0012-deleted-means-gone.md) | Deleted link data is overwritten, not just unlisted: secure_delete is on and the WAL is truncated after a delete | Accepted |
 | [0013](0013-team-api.md) | The team API under /-/api/: routes, JSON fields and errors | Accepted |
 | [0014](0014-counts-written-daily.md) | A click touches no file; the day's counts are written once, after the day | Accepted |
+| [0015](0015-stats-page.md) | The stats page is server-rendered at /-/stats, loads only its own /-/stats.css and /-/stats.js, and takes the public site's address from LINKLING_SITE | Accepted |
 <!-- adr-index:end -->
