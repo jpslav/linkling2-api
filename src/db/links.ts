@@ -82,11 +82,6 @@ export function deleteLink(db: Database, name: string): boolean {
   return db.prepare("DELETE FROM links WHERE name = ?").run(name).changes > 0;
 }
 
-/** A link with no expiry never expires; otherwise it has expired once `now` reaches it. */
-export function isExpired(link: Link, now: Date): boolean {
-  return link.expiresAt !== null && now.getTime() >= Date.parse(link.expiresAt);
-}
-
 /** One use of a link: that UTC day's count for it goes up by one, in a single upsert. */
 export function incrementCount(db: Database, linkId: number, now: Date): void {
   db.prepare(

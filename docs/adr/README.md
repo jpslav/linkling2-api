@@ -9,5 +9,6 @@
 | [0006](0006-hosting-topology.md) | Hosting topology: one service container and a SQLite volume | Accepted |
 | [0007](0007-repo-layout.md) | Repo layout: service and CLI in linkling-api, static site in linkling-web | Accepted |
 | [0008](0008-third-party-services.md) | No third-party services, in the product or on the public site | Accepted |
-| [0009](0009-migrations-user-version.md) | Migrations are numbered SQL files tracked by PRAGMA user_version, with no migrations table | Accepted |
+| [0009](0009-redirect-header-allowlist.md) | The redirect's response headers are an allowlist, pinned by a test | Accepted |
+| [0010](0010-migrations-user-version.md) | Migrations are numbered SQL files tracked by PRAGMA user_version, with no migrations table | Accepted |
 <!-- adr-index:end -->

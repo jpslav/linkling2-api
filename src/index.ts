@@ -1,5 +1,10 @@
-// Placeholder so CI has something real to typecheck, build and test.
-// The service replaces this; only tests/index.test.ts imports it.
-export function serviceName(): string {
-  return "linkling";
-}
+export { buildApp, type AppDeps } from "./app.js";
+export { isExpired, type Link, type LinkLookup } from "./links.js";
+export {
+  MADE_UP_ALPHABET,
+  MADE_UP_LENGTH,
+  claimMadeUpName,
+  makeUpName,
+  normalizeName,
+  type RandomIndex,
+} from "./names.js";

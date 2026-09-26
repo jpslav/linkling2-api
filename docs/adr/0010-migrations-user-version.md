@@ -1,4 +1,4 @@
-# ADR-0009 — Migrations are numbered SQL files tracked by PRAGMA user_version, with no migrations table
+# ADR-0010 — Migrations are numbered SQL files tracked by PRAGMA user_version, with no migrations table
 
 - Status: Accepted
 - Approver: claude

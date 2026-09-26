@@ -40,7 +40,7 @@ function userVersion(db: Database): number {
 /**
  * Applies every numbered migration the database has not had yet, each in its own
  * transaction together with the bump of `PRAGMA user_version`, which is the only
- * record of what has run (ADR-0009): the schema stays exactly the tables the
+ * record of what has run (ADR-0010): the schema stays exactly the tables the
  * migrations create. Returns the versions it applied; running it again applies none.
  */
 export function migrate(db: Database, dir: string = MIGRATIONS_DIR): number[] {
