@@ -34,7 +34,7 @@ describe("startup", () => {
     }
   });
 
-  test("refuses a key Bearer would not carry intact: spaces, line breaks, non-ASCII", async () => {
+  test("refuses a key that is not printable ASCII without spaces", async () => {
     for (const key of ["   ", `${TEST_KEY}\n`, ` ${TEST_KEY}`, "two words", "clé-secrète"]) {
       const { start, said, opened } = io();
       expect(await main({ LINKLING_KEY: key }, start)).toBeNull();

@@ -24,6 +24,7 @@ export function keyFromAuthorization(header: string | undefined): string | null 
  * spaces. Node trims the ends of header values, and a space at either end of a Bearer key
  * is lost, so such a key works as the Basic password but never as Bearer. Node also reads
  * header bytes as latin1, so a non-ASCII key sent as UTF-8 (as curl sends it) never matches.
+ * A space inside a key would survive; it is refused too, to keep the rule one line.
  */
 export function keyProblem(key: string | undefined): string | null {
   if (key === undefined || key === "") return "is not set";
