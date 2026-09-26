@@ -25,7 +25,7 @@ const clicker = {
   referrer: "https://referrer.example/canary-ref-8c2d",
 };
 
-function follow(): { stdout: string; stderr: string; dbBytes: Buffer; status: number | null } {| null } {
+function follow(): { stdout: string; stderr: string; dbBytes: Buffer; status: number | null } {
   const dir = tempDir();
   const dbPath = join(dir, "linkling.db");
   const run = spawnSync(process.execPath, [CHILD, dbPath, JSON.stringify(clicker)], {
