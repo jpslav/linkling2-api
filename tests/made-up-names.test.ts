@@ -30,8 +30,9 @@ describe("R-002 made-up names", () => {
     expect(names.filter((name) => !MADE_UP.test(name))).toEqual([]);
     expect(new Set(names).size).toBe(10_000);
     // The store makes the names distinct; the generator has to make clashes rare. Among
-    // 10,000 uniform draws from 31^6 the expected number is about 0.06.
-    expect(clashes).toBeLessThanOrEqual(2);
+    // 10,000 uniform draws from 31^6 the expected number is about 0.056, so more than 3
+    // happens by chance about once in 2.5 million runs.
+    expect(clashes).toBeLessThanOrEqual(3);
   });
 
   test("R-002: made-up names come from node:crypto randomInt", () => {

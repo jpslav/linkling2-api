@@ -35,8 +35,10 @@ export function buildApp({ links, now = () => new Date() }: AppDeps): FastifyIns
       maxParamLength: 16_384,
     },
     // A malformed percent-escape is not a name either: the same plain 404, not a JSON 400.
-    frameworkErrors: (_error, _request, reply) => {
-      void plainPage(reply, 404, "No such link.");
+    // Anything else Fastify reports here is its own fault, not the URL's.
+    frameworkErrors: (error, _request, reply) => {
+      const notAName = error.code === "FST_ERR_BAD_URL" || error.code === "FST_ERR_MAX_PARAM_LENGTH";
+      void (notAName ? plainPage(reply, 404, "No such link.") : plainPage(reply, 500, "Something went wrong."));
     },
   });
 
