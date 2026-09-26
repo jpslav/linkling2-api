@@ -36,6 +36,8 @@ export interface CliIo {
   fetch?: typeof fetch;
   /** The system's login name for whoever is running this, for when `$USER` is not set. */
   login?: () => string;
+  /** How long a request may take, whole; TIMEOUT_MS unless a test shortens it. */
+  timeoutMs?: number;
 }
 
 class Failure extends Error {
@@ -86,6 +88,7 @@ interface Settings {
   base: string;
   key: string;
   fetch: typeof fetch;
+  timeoutMs: number;
 }
 
 /** LINKLING_BASE and LINKLING_KEY, or the usage error saying which is wrong. */
@@ -102,7 +105,7 @@ function settings(io: CliIo): Settings {
   const key = io.env["LINKLING_KEY"];
   const problem = keyProblem(key);
   if (key === undefined || problem !== null) throw usageError(`LINKLING_KEY ${problem ?? "is not set"}`);
-  return { base: url.origin, key, fetch: io.fetch ?? globalThis.fetch };
+  return { base: url.origin, key, fetch: io.fetch ?? globalThis.fetch, timeoutMs: io.timeoutMs ?? TIMEOUT_MS };
 }
 
 /** Who a link is made by (R-008): --by, else $USER, else the system's login name. */
@@ -123,8 +126,8 @@ function madeBy(io: CliIo, by: string | undefined): string {
 }
 
 /** Why a request got no answer, in a few words. */
-function reason(err: unknown): string {
-  if (err instanceof Error && err.name === "TimeoutError") return `no answer within ${TIMEOUT_MS / 1000} s`;
+function reason(err: unknown, timeoutMs: number): string {
+  if (err instanceof Error && err.name === "TimeoutError") return `no answer within ${timeoutMs / 1000} s`;
   const cause = (err instanceof Error ? err.cause : undefined) as { code?: string; errors?: { code?: string }[] } | undefined;
   return cause?.code ?? cause?.errors?.[0]?.code ?? (err instanceof Error ? err.message : String(err));
 }
@@ -175,7 +178,7 @@ async function call(s: Settings, method: string, path: string, expect: 200 | 201
       method,
       // A redirect is reported, never followed: following one would replay a POST as a GET.
       redirect: "manual",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(s.timeoutMs),
       headers: {
         authorization: `Bearer ${s.key}`,
         accept: "application/json",
@@ -186,7 +189,7 @@ async function call(s: Settings, method: string, path: string, expect: 200 | 201
     status = res.status;
     text = await res.text();
   } catch (err) {
-    throw new Failure(EXIT.noAnswer, `cannot reach ${s.base}: ${reason(err)}`);
+    throw new Failure(EXIT.noAnswer, `cannot reach ${s.base}: ${reason(err, s.timeoutMs)}`);
   }
   let json: unknown;
   try {
@@ -202,17 +205,20 @@ async function call(s: Settings, method: string, path: string, expect: 200 | 201
     if (expect === 204 || json !== undefined) return json;
     throw notLinkling(s.base, status);
   }
-  // Only the API's own `{"error": "..."}` is the service speaking; anything else is some other server.
-  const said = isObject(json) && typeof json["error"] === "string" ? json["error"] : null;
+  // Only the API's own answer, exactly `{"error": "..."}` (ADR-0013), is the service speaking. Any
+  // other body, even JSON with an `error` field, is some other server: a stock Fastify 404 has one.
+  const said = isObject(json) && Object.keys(json).length === 1 && typeof json["error"] === "string" ? json["error"] : null;
   if (said === null) throw notLinkling(s.base, status);
   throw new Failure(status >= 400 && status < 500 ? EXIT.refused : EXIT.noAnswer, `${said} (${status})`);
 }
 
 /** Left-aligned columns, two spaces apart; the last is never padded, so a long URL stays whole. */
 function table(rows: string[][]): string {
-  const widths = rows[0]!.map((_, i) => Math.max(...rows.map((row) => row[i]!.length)));
+  // Widths in characters, not UTF-16 units, so an emoji in a made-by name takes one column.
+  const width = (cell: string): number => [...cell].length;
+  const widths = rows[0]!.map((_, i) => Math.max(...rows.map((row) => width(row[i]!))));
   const line = (row: string[]): string =>
-    row.map((cell, i) => (i === row.length - 1 ? cell : cell.padEnd(widths[i]!))).join("  ");
+    row.map((cell, i) => (i === row.length - 1 ? cell : cell + " ".repeat(widths[i]! - width(cell)))).join("  ");
   return rows.map((row) => `${line(row)}\n`).join("");
 }
 
@@ -339,9 +345,12 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
 
 if (import.meta.main) {
   // `linkling list | head -1` closes the pipe early; that is the reader's choice, not an error.
-  process.stdout.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code !== "EPIPE") throw err;
-  });
+  // The same goes for a closed stderr, which would otherwise end a run that worked with exit 1.
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code !== "EPIPE") throw err;
+    });
+  }
   process.exitCode = await runCli(process.argv.slice(2), {
     env: process.env,
     stdout: (text) => void process.stdout.write(text),

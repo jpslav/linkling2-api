@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { EXIT } from "../src/cli.js";
+import { seed } from "./support/app.js";
 import { stack, type Ran } from "./support/cli.js";
 import { TEST_KEY } from "./support/team-key.js";
 
@@ -44,6 +45,23 @@ function exec(command: string, args: string[], env: Record<string, string>): Pro
   });
 }
 
+/** Runs the built file with the parent's end of one output pipe closed at once, as `| head -1` does to stdout. */
+function exitWithClosedPipe(which: "stdout" | "stderr", args: string[], env: Record<string, string>): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [built, ...args], { env, stdio: ["ignore", "pipe", "pipe"] });
+    child[which].destroy();
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error("the command did not finish in 20 s"));
+    }, 20_000);
+    child.on("error", reject);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve(code ?? -1);
+    });
+  });
+}
+
 const PATH = () => `${bin}:${process.env["PATH"]}`;
 
 // The command R-015's verify line in products/linkling/REQUIREMENTS.md runs, character for character.
@@ -76,6 +94,15 @@ describe("dist/cli.js", () => {
     const gone = await exec("linkling", ["list"], processEnv);
     expect(gone.code).toBe(EXIT.noAnswer);
     expect(gone.err).toContain("cannot reach");
+  });
+
+  test("a reader that closes the pipe early (| head -1) does not turn a run that worked into a failure", async () => {
+    const { app, env } = await stack();
+    const processEnv = env as Record<string, string>;
+    // Nothing on stdout to lose: `list` of no links says so on stderr only.
+    expect(await exitWithClosedPipe("stderr", ["list"], processEnv)).toBe(0);
+    seed(app.links, "one", "https://example.com/a");
+    expect(await exitWithClosedPipe("stdout", ["list"], processEnv)).toBe(0);
   });
 
   test("R-015: the verify line, run under bash with linkling on PATH, exits 0 and does all five things", async () => {

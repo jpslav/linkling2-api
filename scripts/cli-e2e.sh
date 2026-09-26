@@ -9,12 +9,14 @@
 # that line does not: made_by, expiry, the exit codes for a taken name, a link that is not
 # there and a wrong key, and a follow showing up in `linkling counts`. It makes links under
 # names of its own and deletes them on the way out. The one name it cannot choose is
-# `cli-test`, which R-015's line fixes: a stack that already has one fails at the first step.
+# `cli-test`, which R-015's line fixes: on a stack that already has a link by that name it stops
+# with CLI E2E BLIND before making anything, and it never deletes one it did not make.
 #
 # Exits 0 printing CLI E2E PASS, 1 printing CLI E2E FAIL: <the step> when a step's result is
 # not what it should be, and 2 printing CLI E2E BLIND: <what was missing> when nothing could be
-# measured: no `linkling` on PATH, no LINKLING_BASE or LINKLING_KEY, or a service whose
-# /-/health does not answer 200 within 5 s. A missing stack is never a pass.
+# measured: no `linkling` on PATH, no LINKLING_BASE or LINKLING_KEY, a service whose /-/health
+# does not answer 200 within 5 s, or a stack that already has a link called cli-test. A missing
+# stack is never a pass.
 set -u
 
 blind() {
@@ -52,7 +54,17 @@ suffix="$$-$RANDOM"
 plain="e2e-plain-$suffix"
 byana="e2e-by-$suffix"
 week="e2e-week-$suffix"
-trap 'for n in "$plain" "$byana" "$week"; do linkling delete "$n" >/dev/null 2>&1; done' EXIT
+owned="$plain $byana $week"
+trap 'for n in $owned; do linkling delete "$n" >/dev/null 2>&1; done' EXIT
+
+# 0. R-015's line fixes the name `cli-test`. A link already called that is not this script's to
+# delete, and the line would fail on it with a 409, which says nothing about the command.
+listing=$(linkling list 2>&1) || fail "linkling list, before anything is made: $listing"
+if printf '%s\n' "$listing" | grep -q '^cli-test '; then
+  blind "a link named cli-test is already on $LINKLING_BASE; R-015's line makes it, so delete it or use a fresh stack"
+fi
+# It is absent now, so whatever R-015's line leaves behind is this run's, and goes on the way out.
+owned="$owned cli-test"
 
 # 1. R-015's verify line, character for character.
 out=$(bash -c "$R015" 2>&1) || fail "R-015's verify line exited $?: $out"

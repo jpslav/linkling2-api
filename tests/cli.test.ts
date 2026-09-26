@@ -34,6 +34,8 @@ function answering(answer: () => Response | Promise<Response>) {
 
 const others: Server[] = [];
 afterEach(async () => {
+  // A server that never ends its answer would keep close() waiting for the connection.
+  for (const server of others) server.closeAllConnections();
   await Promise.all(others.splice(0).map((s) => new Promise((done) => s.close(done))));
 });
 
@@ -42,6 +44,19 @@ async function otherServer(status: number, headers: Record<string, string>, body
   const server = createServer((_req, res) => {
     res.writeHead(status, headers);
     res.end(body);
+  });
+  others.push(server);
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+/** A server that takes the request and never finishes answering it: no answer at all, or one that stops after the headers. */
+async function stallingServer(afterHeaders: boolean): Promise<string> {
+  const server = createServer((_req, res) => {
+    if (afterHeaders) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.write('{"links":');
+    }
   });
   others.push(server);
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
@@ -119,6 +134,16 @@ describe("R-015 a team member does all of it from the command line", () => {
     const edited = await run(["edit", "old", "https://example.com/p"]);
     expect(edited.code).toBe(0);
     expect(edited.err).toBe("linkling: note: old has expired; changing its target does not bring it back\n");
+  });
+
+  test("list lines its columns up by characters, so an emoji in a made-by name does not push them", async () => {
+    const { app, run } = await stack({ now: NOW });
+    seed(app.links, "party", "https://example.com/p", null, { madeBy: "🎉" });
+    seed(app.links, "plain", "https://example.com/q", null, { madeBy: "sam" });
+    const rows = (await run(["list"])).out.trimEnd().split("\n");
+    const start = (row: string): number => [...row.slice(0, row.indexOf("never"))].length;
+    expect(rows).toHaveLength(3);
+    expect(start(rows[1]!)).toBe(start(rows[2]!));
   });
 
   test("a name is folded to lower case, as the API folds it", async () => {
@@ -316,14 +341,27 @@ describe("no usable answer: exit 4, never 0", () => {
     expect(ran.err).toMatch(/^linkling: cannot reach http:\/\/127\.0\.0\.1:\d+: ECONNREFUSED\n$/);
   });
 
-  test("a service that does not answer in time", async () => {
-    const hang = answering(() => Promise.reject(Object.assign(new Error("The operation timed out."), { name: "TimeoutError" })));
-    const { base, run } = await stack();
-    expect(await run(["list"], {}, { fetch: hang.fetch })).toEqual({
-      code: EXIT.noAnswer,
-      out: "",
-      err: `linkling: cannot reach ${base}: no answer within ${TIMEOUT_MS / 1000} s\n`,
-    });
+  test("a service that does not answer in time, or stops partway through its answer, is given up on", async () => {
+    const { run } = await stack();
+    for (const afterHeaders of [false, true]) {
+      const base = await stallingServer(afterHeaders);
+      const started = Date.now();
+      // The real fetch and the real AbortSignal, with the wait shortened from TIMEOUT_MS.
+      const ran = await run(["list"], { LINKLING_BASE: base }, { timeoutMs: 300 });
+      expect([afterHeaders, ran]).toEqual([
+        afterHeaders,
+        { code: EXIT.noAnswer, out: "", err: `linkling: cannot reach ${base}: no answer within 0.3 s\n` },
+      ]);
+      expect(Date.now() - started).toBeLessThan(TIMEOUT_MS / 2);
+    }
+  });
+
+  test("the wait is TIMEOUT_MS, 10 s, unless a test shortens it", async () => {
+    const double = answering(() => new Response(JSON.stringify({ links: [] }), { status: 200 }));
+    const { run } = await stack();
+    await run(["list"], {}, { fetch: double.fetch });
+    const signal = double.asked[0]!.init.signal as AbortSignal;
+    expect([TIMEOUT_MS, signal.aborted]).toEqual([10_000, false]);
   });
 
   test("every request is bearer-authenticated, is never redirected, and can be given up on", async () => {
@@ -355,15 +393,21 @@ describe("no usable answer: exit 4, never 0", () => {
     const answers: [string, number, Record<string, string>, string][] = [
       ["an HTML page", 200, html, "<html>hello</html>"],
       ["an HTML 404", 404, html, "<html>not found</html>"],
+      // What a stock Fastify app answers for a route it does not have: JSON, with an `error` field.
+      ["a Fastify 404", 404, json, '{"message":"Route GET:/-/api/links not found","error":"Not Found","statusCode":404}'],
+      ["JSON with an error field and more", 400, json, '{"error":"Bad Request","message":"x"}'],
       ["JSON that is not the API's list", 200, json, '{"links":"none"}'],
       ["an empty 200", 200, {}, ""],
       ["a 500 that is not the API's", 500, html, "oops"],
     ];
+    const commands = [["list"], ["make", "https://example.com/a"], ["edit", "x", "https://example.com/a"], ["delete", "x"], ["counts", "x"]];
     for (const [label, status, headers, body] of answers) {
       const base = await otherServer(status, headers, body);
-      const ran = await run(["list"], { LINKLING_BASE: base });
-      expect([label, ran.code, ran.out]).toEqual([label, EXIT.noAnswer, ""]);
-      expect(ran.err).toContain(`answered ${status}`);
+      for (const argv of commands) {
+        const ran = await run(argv, { LINKLING_BASE: base });
+        expect([label, argv[0], ran.code, ran.out]).toEqual([label, argv[0], EXIT.noAnswer, ""]);
+        expect(ran.err).toContain(`answered ${status}`);
+      }
     }
   });
 
