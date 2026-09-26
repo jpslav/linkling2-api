@@ -57,8 +57,24 @@ describe("R-026 shape lock", () => {
     const app = buildApp({ links: new MemoryLinks() });
     // A later item's route under /-/ is accepted; one at the root is refused when made.
     app.get("/-/probe", async () => "ok");
-    expect(() => app.get("/privacy", async () => "no")).toThrow("route /privacy is outside /-/");
-    expect(() => app.post("/links", async () => "no")).toThrow("route /links is outside /-/");
+    app.post("/-/api/probe", async () => "ok");
+    // Refused at the root whatever the path, the method or the constraints, including the
+    // two paths the redirect itself already holds.
+    const refused: [string, () => unknown][] = [
+      ["GET /privacy", () => app.get("/privacy", async () => "no")],
+      ["POST /links", () => app.post("/links", async () => "no")],
+      ["POST /", () => app.post("/", async () => "no")],
+      ["DELETE /:name", () => app.delete("/:name", async () => "no")],
+      ["GET /:slug", () => app.get("/:slug", async () => "no")],
+      ["GET /*", () => app.get("/*", async () => "no")],
+      [
+        "GET /:name for one host",
+        () => app.route({ method: "GET", url: "/:name", constraints: { host: "a.example" }, handler: async () => "no" }),
+      ],
+    ];
+    for (const [label, register] of refused) {
+      expect(register, label).toThrow("is outside /-/");
+    }
     await app.ready();
     expect(app.hasRoute({ method: "GET", url: "/:name" })).toBe(true);
     expect(app.hasRoute({ method: "GET", url: "/" })).toBe(true);

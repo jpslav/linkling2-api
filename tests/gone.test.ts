@@ -54,9 +54,27 @@ describe("R-018 gone links", () => {
   test("a name of the wrong shape answers the same 404 without a lookup", async () => {
     const links = new MemoryLinks();
     const app = appAt(links);
-    for (const url of ["/q3_plan", "/favicon.ico", `/${"x".repeat(65)}`, "/%E2%84%AA"]) {
+    for (const url of [
+      "/q3_plan",
+      "/favicon.ico",
+      `/${"x".repeat(65)}`,
+      `/${"x".repeat(101)}`, // past Fastify's default maxParamLength, which answers a JSON 414
+      `/${"x".repeat(5000)}`,
+      "/%E2%84%AA",
+      "/q3-plan%", // a malformed escape, which Fastify answers with a JSON 400 by default
+      "/%zz",
+    ]) {
       expectPlainPage(await app.inject({ method: "GET", url }), 404, "No such link.\n");
     }
     expect(links.lookups).toBe(0);
+  });
+
+  test("a store that fails answers a plain 500 that does not repeat the store's error", async () => {
+    const app = buildApp({
+      links: {
+        lookup: () => Promise.reject(new Error("SQLITE_BUSY at /data/linkling.db")),
+      },
+    });
+    expectPlainPage(await app.inject({ method: "GET", url: "/q3-plan" }), 500, "Something went wrong.\n");
   });
 });

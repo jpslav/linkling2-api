@@ -1,6 +1,13 @@
-import { describe, expect, test } from "vitest";
+import * as crypto from "node:crypto";
+import { describe, expect, test, vi } from "vitest";
 import { MADE_UP_ALPHABET, claimMadeUpName, makeUpName } from "../src/names.js";
 import { MemoryLinks } from "./support/memory-links.js";
+
+// Wraps the real randomInt so a test can see that it, and nothing weaker, is the source.
+vi.mock("node:crypto", async (importOriginal) => {
+  const real = await importOriginal<typeof import("node:crypto")>();
+  return { ...real, randomInt: vi.fn(real.randomInt) };
+});
 
 // R-002's own pattern, typed out rather than built from MADE_UP_ALPHABET.
 const MADE_UP = /^[a-hjkmnp-z2-9]{6}$/;
@@ -9,12 +16,43 @@ describe("R-002 made-up names", () => {
   test("R-002: 10,000 made-up names match ^[a-hjkmnp-z2-9]{6}$ and none repeat", async () => {
     const store = new MemoryLinks();
     const names: string[] = [];
+    let clashes = 0;
     for (let i = 0; i < 10_000; i++) {
-      names.push(await claimMadeUpName((name) => store.claim(name)));
+      names.push(
+        await claimMadeUpName((name) => {
+          const claimed = store.claim(name);
+          if (!claimed) clashes++;
+          return claimed;
+        }),
+      );
     }
     expect(names).toHaveLength(10_000);
     expect(names.filter((name) => !MADE_UP.test(name))).toEqual([]);
     expect(new Set(names).size).toBe(10_000);
+    // The store makes the names distinct; the generator has to make clashes rare. Among
+    // 10,000 uniform draws from 31^6 the expected number is about 0.06.
+    expect(clashes).toBeLessThanOrEqual(2);
+  });
+
+  test("R-002: made-up names come from node:crypto randomInt", () => {
+    const randomInt = vi.mocked(crypto.randomInt);
+    randomInt.mockClear();
+    makeUpName();
+    expect(randomInt).toHaveBeenCalledTimes(6);
+    expect(randomInt.mock.calls.every(([max]) => max === 31)).toBe(true);
+  });
+
+  test("R-002: every letter is about equally likely", () => {
+    const counts = new Map<string, number>();
+    const draws = 31 * 2_000;
+    for (let i = 0; i < draws / 6; i++) {
+      for (const c of makeUpName()) counts.set(c, (counts.get(c) ?? 0) + 1);
+    }
+    // Chi-squared over 31 letters (30 degrees of freedom); 80 is past the 1-in-a-million tail.
+    const expected = (Math.floor(draws / 6) * 6) / 31;
+    let chi2 = 0;
+    for (const c of MADE_UP_ALPHABET) chi2 += ((counts.get(c) ?? 0) - expected) ** 2 / expected;
+    expect(chi2).toBeLessThan(80);
   });
 
   test("R-002: a clash is retried with a fresh name", async () => {
