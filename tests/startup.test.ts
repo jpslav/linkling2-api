@@ -71,6 +71,9 @@ describe("startup", () => {
   test("links the stats page's Privacy to LINKLING_SITE when set, and starts without it when empty", async () => {
     for (const [site, privacy] of [
       ["https://linkling.example.org/about/", "https://linkling.example.org/about/privacy.html"],
+      // Spellings URL accepts, which as text would be relative or doubled links.
+      ["https:linkling.example.org", "https://linkling.example.org/privacy.html"],
+      ["HTTPS://Linkling.Example.org\\", "https://linkling.example.org/privacy.html"],
       ["", "https://github.com/jpslav/linkling2-web/blob/main/privacy.html"],
     ] as const) {
       const { start, said } = io();

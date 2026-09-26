@@ -37,16 +37,20 @@ export function siteProblem(site: string | undefined): string | null {
     return problem;
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return problem;
-  // Tested on the text, which privacyUrl appends to as it is: URL reports an empty query or
-  // fragment as "", either of which would swallow `/privacy.html`, and it drops spaces and
-  // control characters at the ends, which would break the link once something follows them.
+  // `?` and `#` are tested on the text, since URL reports an empty query or fragment as "".
+  // Spaces and control characters are refused too: URL would quietly drop them at the ends.
   if (url.username !== "" || url.password !== "" || /[?#\x00-\x20\x7f]/.test(site)) return problem;
   return null;
 }
 
-/** The public site's privacy page (its path is ADR-0007's), or the fallback. */
+/**
+ * The public site's privacy page (its path is ADR-0007's), or the fallback. Built from the
+ * parsed address, so a spelling URL accepts (`https:x.example`) still gives an absolute link.
+ */
 export function privacyUrl(site: string | undefined): string {
-  return site === undefined || site === "" ? PRIVACY_FALLBACK : `${site.replace(/\/+$/, "")}/privacy.html`;
+  if (site === undefined || site === "") return PRIVACY_FALLBACK;
+  const url = new URL(site);
+  return `${url.origin}${url.pathname.replace(/\/+$/, "")}/privacy.html`;
 }
 
 const ESCAPES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
