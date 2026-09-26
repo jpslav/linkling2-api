@@ -54,7 +54,7 @@ const links = {
   },
 };
 
-const app = buildApp({ links, now: () => now });
+const app = buildApp({ links, key: "team-key-for-the-test", now: () => now });
 const headers = { "user-agent": clicker.userAgent, referer: clicker.referrer };
 const statuses = [];
 for (const url of ["/q3-plan", "/nope", "/old", "/boom", "/%zz", "/-/nothing-here"]) {
