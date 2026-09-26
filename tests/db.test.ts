@@ -1,8 +1,11 @@
 import { copyFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
+import { Worker } from "node:worker_threads";
 import BetterSqlite3 from "better-sqlite3";
 import { expect, test } from "vitest";
 import { MIGRATIONS_DIR, migrate } from "../src/db/migrate.js";
+import { openDatabase } from "../src/db/open.js";
 import { openTempDatabase, tempDir } from "./temp-db.js";
 
 function tableNames(db: BetterSqlite3.Database): string[] {
@@ -41,6 +44,32 @@ test("the database runs in WAL mode", () => {
   expect(db.pragma("journal_mode", { simple: true })).toBe("wal");
 });
 
+test("opening a fresh file another connection has locked waits for the lock, then turns WAL on", async () => {
+  const path = join(tempDir(), "linkling.db");
+  // Another connection holds the write lock on the new file for 300ms: the moment in
+  // which a second process starting at once would get SQLITE_BUSY switching to WAL.
+  const holder = new Worker(
+    `const { workerData, parentPort } = require("node:worker_threads");
+     const Database = require(workerData.driver);
+     const db = new Database(workerData.path);
+     db.exec("BEGIN IMMEDIATE; CREATE TABLE lock_holder (x);");
+     parentPort.postMessage("locked");
+     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+     db.exec("ROLLBACK");
+     db.close();`,
+    { eval: true, workerData: { path, driver: createRequire(import.meta.url).resolve("better-sqlite3") } },
+  );
+  await new Promise((resolve) => holder.once("message", resolve));
+  const db = openDatabase(path);
+  try {
+    expect(db.pragma("journal_mode", { simple: true })).toBe("wal");
+    expect(db.pragma("user_version", { simple: true })).toBe(1);
+  } finally {
+    db.close();
+    await holder.terminate();
+  }
+});
+
 test("a gap in the migration numbers is refused before anything runs", () => {
   const dir = tempDir();
   copyFileSync(join(MIGRATIONS_DIR, "0001_links_and_daily_counts.sql"), join(dir, "0001_links_and_daily_counts.sql"));
@@ -73,6 +102,15 @@ test("a .sql file that is not named NNNN_<what>.sql is refused, not skipped", ()
     expect(() => migrate(db, dir)).toThrow(/would never run/);
     expect(tableNames(db)).toEqual([]);
   }
+});
+
+test("files that do not start with a digit, such as macOS ._ sidecars, are not migrations", () => {
+  const dir = tempDir();
+  copyFileSync(join(MIGRATIONS_DIR, "0001_links_and_daily_counts.sql"), join(dir, "0001_links_and_daily_counts.sql"));
+  writeFileSync(join(dir, "._0001_links_and_daily_counts.sql"), "");
+  writeFileSync(join(dir, "README.md"), "notes");
+  const db = new BetterSqlite3(":memory:");
+  expect(migrate(db, dir)).toEqual([1]);
 });
 
 test("two migrations with the same number are refused", () => {

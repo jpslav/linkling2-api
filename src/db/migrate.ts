@@ -18,8 +18,9 @@ function listMigrations(dir: string): Migration[] {
     const match = MIGRATION_FILE.exec(file);
     if (match) {
       migrations.push({ version: Number(match[1]), file });
-    } else if (file.endsWith(".sql")) {
+    } else if (/^\d.*\.sql$/.test(file)) {
       // A misnamed migration would otherwise never run, and start-up would still succeed.
+      // Names not starting with a digit (macOS's ._ sidecar files, say) are not migrations.
       throw new Error(`${file} is not named NNNN_<what>.sql, so it would never run`);
     }
   }
