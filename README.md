@@ -28,8 +28,9 @@ it; `docker compose down -v` deletes every link and count.
 Outside Docker: `npm ci && npm run build && LINKLING_KEY=... node dist/server.js`.
 
 The service writes no access log, and handling a request writes nothing about it to any log
-(`privacy-manifest.json`). It writes a line only when it will not start, or when the day's
-counts could not be written. A failing database shows up as the `500`s the API answers.
+(`privacy-manifest.json`). It writes a line only when it will not start, when it cannot rebuild the
+database file at start, or when the day's counts could not be written. A failing database
+shows up as the `500`s the API answers.
 
 A click touches no file. The service tallies follows in memory and writes the day's counts
 once, five seconds after UTC midnight, and again when it stops (ADR-0014). A crash loses
@@ -45,13 +46,13 @@ apps' link previews do (R-029).
 
 ## The API
 
-Everything under `/-/` is the service's own; the rest is short names (ADR-0001). Every
-`/-/api/` call needs `Authorization: Bearer $LINKLING_KEY`. The full contract is
+Everything under `/-/` is the service's own; the rest is short names (ADR-0001). Each route
+below needs `Authorization: Bearer $LINKLING_KEY`. The full contract is
 [ADR-0013](docs/adr/0013-team-api.md).
 
 | Route | Body | Answers |
 |---|---|---|
-| `POST /-/api/links` | `{"url", "name"?, "made_by"?, "expires"?}` | `201` link, `400`, `409` name taken |
+| `POST /-/api/links` | `{"url", "name"?, "made_by"?, "expires"?}` | `201` link, `400`, `409` name taken, `415` |
 | `GET /-/api/links` | none | `200 {"links": [link, …]}`, newest first |
 | `GET /-/api/links/:name` | none | `200` link, `404` |
 | `PATCH /-/api/links/:name` | `{"url"}` | `200` link, `400`, `404` |

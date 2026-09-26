@@ -39,8 +39,8 @@ written to disk?" in `products/linkling/DECISIONS.md`. This ADR is how the servi
   - Each write is one transaction, with rows inserted in (link, day) order rather than
     the order anyone clicked. It is followed by `wal_checkpoint(TRUNCATE)`, which throws
     when another connection keeps it from emptying the WAL, as in ADR-0012.
-  - The files' modification times then say "a daily write, or a shutdown", never when
-    anyone clicked.
+  - The files' modification times then show a start, a daily write, a stop, or a team
+    member's change to a link, and never when anyone clicked.
 - **Every write ends by rebuilding the file** (`SqliteLinks.compact`: `VACUUM`, with
   `temp_store = MEMORY` so the scratch copy never touches the disk, then the truncating
   checkpoint). The service also rebuilds once at start, which normalizes a file from before
@@ -61,9 +61,10 @@ written to disk?" in `products/linkling/DECISIONS.md`. This ADR is how the servi
   container ten seconds after SIGTERM) and writes again. Then it closes the database and
   exits, even if a connection is still open. A half-sent request, which anyone can make,
   therefore cannot cost the day's counts.
-- **What the team sees includes the tallies.** A link's counts (`/-/api/links/:name/counts`,
-  and the stats page through the same store) add the unwritten tallies to what is on disk,
-  so today's count is current all day.
+- **What the team sees includes the tallies.** `/-/api/links/:name/counts` adds the
+  unwritten tallies to what is on disk (`SqliteLinks.dailyCounts`), so today's count is
+  current all day. The stats page (LL-008) has to read counts through the same store to
+  see them.
 - **A write that fails** logs one fixed line, `linkling: writing the daily counts failed`,
   with nothing from the error. A write that did not commit keeps its tallies for the next
   write. One that committed but could not truncate the WAL is not written again. That
@@ -77,11 +78,12 @@ written to disk?" in `products/linkling/DECISIONS.md`. This ADR is how the servi
 - That write lands in one go and leaves the WAL empty.
 - It survives a failure, and says so when the WAL stays.
 - The midnight write leaves the new day alone.
-- The same counts written in one go or in two leave byte-identical files.
+- The same counts, split differently between the same number of writes, leave
+  byte-identical files.
 - A stop writes the counts before it waits, then waits the full three seconds for a
   request whose headers never finish, and no longer.
 
-Switching back to one write per click turns three of its tests red. `tests/db.test.ts`
+Switching back to one write per click turns four of its nine tests red. `tests/db.test.ts`
 pins the missing rowid and the migration.
 
 Rejected:

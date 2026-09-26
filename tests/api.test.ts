@@ -117,6 +117,19 @@ describe("a body the API cannot use is refused with a 400 and stores nothing", (
     expect(app.logged).toEqual([]);
   });
 
+  test("a __proto__ key in the body is an unknown field, and pollutes nothing", async () => {
+    const app = appWith();
+    const res = await app.inject({
+      method: "POST",
+      url: "/-/api/links",
+      headers: { authorization: `Bearer ${TEST_KEY}`, "content-type": "application/json" },
+      payload: '{"url":"https://example.com/a","__proto__":{"polluted":true}}',
+    });
+    expect([res.statusCode, res.json().error]).toEqual([400, 'unknown field "__proto__"; the fields are url, name, made_by, expires']);
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+    expect(app.links.list()).toEqual([]);
+  });
+
   test("a DELETE sent with a JSON content type and no body still deletes", async () => {
     const links = tempLinks();
     seed(links, "q3-plan", "https://example.com/q3");

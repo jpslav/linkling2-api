@@ -36,7 +36,7 @@ export async function main(env: NodeJS.ProcessEnv, io: StartIo): Promise<Fastify
 
 export interface Running {
   app: FastifyInstance;
-  /** Stops listening, writes the day's tallied follows, then closes the database. */
+  /** Writes the tallied follows, stops listening (waiting at most CLOSE_WAIT_MS), writes again, closes the database. */
   close: () => Promise<void>;
 }
 

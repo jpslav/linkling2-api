@@ -19,7 +19,8 @@ export interface AppDeps {
 // A URL a client meant for the API, however it spelled the prefix: `/-/API/`, `/%2D/api/`.
 const API_PATH = /^\/(-|%2d)\/api\//i;
 
-// What a client error on the API says. Fastify's own messages can quote the request back.
+// What a client error on the API says: one fixed sentence per status, never the error's own
+// message, which can quote the request back (JSON.parse's, for one, quotes the body).
 const CLIENT_ERRORS: Record<number, string> = {
   400: "the body is not valid JSON",
   413: "the body is too large",
@@ -73,8 +74,10 @@ export function buildApp({
     return plainPage(reply, 404, "No such link.");
   }
 
-  // JSON bodies as Fastify parses them, except that an empty one is no body at all: a
-  // client that sends `Content-Type: application/json` on every call can still DELETE.
+  // JSON bodies, where an empty one is no body at all: a client that sends
+  // `Content-Type: application/json` on every call can still DELETE. This is plain
+  // JSON.parse, not Fastify's own parser, which refuses a `__proto__` key; here such a key
+  // is an unknown field, and src/api-input.ts refuses it.
   app.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => {
     if (body === "") return done(null, undefined);
     try {

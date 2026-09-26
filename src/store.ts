@@ -115,9 +115,10 @@ export class SqliteLinks implements LinkStore {
   /**
    * Rebuilds the whole file in key order and empties the WAL (ADR-0014). Where SQLite puts
    * a row inside a page, and which pages it frees, follow the order rows were written in, so
-   * a file written in two goes (before and after a restart, say) differs from one written
-   * in one; after this it does not. The rebuild's scratch copy is kept in memory, not in a
-   * temporary file. Throws when another connection keeps it from finishing.
+   * the same counts split differently between writes (before and after a restart, say)
+   * would leave different files; after this, the same number of writes leaves the same
+   * file. The rebuild's scratch copy is kept in memory, not in a temporary file. Throws when
+   * another connection keeps it from finishing.
    */
   compact(): void {
     this.db.pragma("temp_store = MEMORY");

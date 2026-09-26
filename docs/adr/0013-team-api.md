@@ -22,8 +22,10 @@ contract reaches team members and is covered by R-001.
 
 ## Decision
 
-Every route needs `Authorization: Bearer <key>` (ADR-0005, enforced by the guard in
-`src/app.ts`). Bodies and answers are JSON with snake_case fields.
+Every route below needs `Authorization: Bearer <key>` (ADR-0005). The guard in
+`src/app.ts` decides by the route that matched, so a path under `/-/api/` that matches
+no route answers a JSON 404 whether or not the key is sent. Bodies and answers are JSON
+with snake_case fields.
 
 | Route | Body | Success | Errors |
 |---|---|---|---|
@@ -38,23 +40,27 @@ A link is `{"name", "url", "made_by", "created_at", "expires_at", "expired"}`. T
 UTC ISO 8601, and `expires_at: null` means never. The internal id is never shown
 (ADR-0004).
 
-The first four points below are what R-001 to R-028's verify lines already fix. The rest
-go beyond them, one decision apiece:
+The first point below is what the requirements' verify lines already fix. The rest go
+beyond them, one decision apiece:
 
 - `url`, `name`, `made_by`, `expires_at` and the 409 on a taken name, from the verify lines
   above.
 - `:name` in a path is folded to lower case, as the redirect folds it, so `Q3-Plan` edits
-  `q3-plan` (R-004). A path name that is not a name is a 404, like an unknown one.
+  `q3-plan` (R-004). A path name that is not a name is a 404, like an unknown one, and every
+  404 under `/-/api/` is JSON (`tests/api.test.ts`).
 - Errors are `{"error": "<sentence>"}`. The 409 names the clash:
   `the name "q3-plan" is already taken`. The 401 stays the guard's plain-text page, which is
   shared with the stats page (ADR-0005).
+- A body that is not valid JSON, or not a JSON object, is a 400. One sent with a content
+  type the service does not read (anything but JSON or plain text) is a 415. A fault is a
+  500 `{"error": "Something went wrong."}` (`tests/api.test.ts`).
 - Every API answer carries `Cache-Control: no-store`.
 - **`expired`** is computed with the same rule the redirect uses, so the CLI and the stats
   page never re-derive it.
 - **`GET /-/api/links/:name`** reads one link.
 - **`/counts`** is its own route rather than a field of every listed link, so a list does
-  not join over all of history. The stats page runs in the same process and can read the
-  store directly.
+  not join over all of history. The stats page runs in the same process and can read
+  counts from the store, which also holds today's not-yet-written counts (ADR-0014).
 - **`url` is `http:` or `https:` only, at most 2,048 characters once encoded,** and is
   stored in the URL parser's encoded form (`new URL(url).href`). A short link can then
   never answer with a `javascript:` Location, nor with a header Node refuses to send.
@@ -62,8 +68,10 @@ go beyond them, one decision apiece:
   verify line sends none and must pass. `made_by` is `NOT NULL` (ADR-0003), and the
   service does not check who it names (ADR-0005), so it stores what it was given: nothing.
   It never invents a name such as `api`. The CLI always sends one, the login name unless
-  `--by` says otherwise (R-008). Given, it is trimmed, at most 64 characters, and has no
-  control characters. A link made through the raw API with no `made_by` therefore shows
+  `--by` says otherwise (R-008). Given, it is trimmed and at most 64 characters. It may
+  not contain a control character, a line or paragraph separator, or a bidirectional mark
+  or override (`CONTROL` in `src/api-input.ts`). The zero-width joiners that emoji and
+  Persian spelling use are allowed. A link made through the raw API with no `made_by` therefore shows
   an empty Made-by. That is at odds with R-008's plain statement, "every link shows who
   made it", and the stats page should show that value deliberately (a dash, say) rather
   than leaving a gap that looks like a fault.

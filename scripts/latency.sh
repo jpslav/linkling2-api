@@ -9,7 +9,8 @@
 #
 # Exits 0 when the p95 is within the budget (LATENCY_BUDGET_MS, default 50), 1 when it is
 # over or a follow answered anything but a 302, and 2 printing LATENCY BLIND when the
-# service did not answer at all, so a missing service is never a pass.
+# service did not answer at all (each request gives up after 5 s) or a setting is unusable,
+# so a missing service is never a pass. LATENCY_FOLLOWS (default 1000) sets the count.
 set -u
 
 FOLLOWS="${LATENCY_FOLLOWS:-1000}"
