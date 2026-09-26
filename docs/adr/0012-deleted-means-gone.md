@@ -1,0 +1,67 @@
+# ADR-0012 — Deleted link data is overwritten, not just unlisted: secure_delete is on and the WAL is truncated after a delete
+
+- Status: Accepted
+- Approver: claude
+- Date: 2026-09-26
+
+## Context
+
+The privacy page (R-022) says a link's name, target, maker, creation time and expiry are
+kept "until the link is deleted". It also says a deleted link's daily counts are "tied to
+no name". Principle `promises-literal` makes both claims about every byte the service
+stores, not only about what the API returns.
+
+SQLite does not work that way by default. A `DELETE` marks the row's space free and leaves
+its bytes where they were. In WAL mode (`src/db/open.ts` switches every file to it), the
+page as it was before the delete also stays in the `-wal` file until that file is
+overwritten or truncated. LL-005's independent review of the privacy text found this. The
+first version of `tests/deleted-leaves-nothing.test.ts` made a link, deleted it, and
+scanned the database files for its name, target and maker. Run against `main`, it found
+all three while the database was still open.
+
+This changes what is on disk. It changes nothing a team member, a clicker or a visitor
+sees, so it is Claude's. It keeps an existing promise rather than making a new one.
+
+## Decision
+
+- `openDatabase` sets `PRAGMA secure_delete = ON` on every connection, so SQLite
+  overwrites deleted content with zeros.
+- `deleteLink` runs `PRAGMA wal_checkpoint(TRUNCATE)` after it deletes a row. That copies
+  the zeroed pages into the main file and empties the `-wal` file, so the WAL keeps no
+  copy of the page from before the delete.
+- The same rule applies to the next code that removes or overwrites link data. LL-007's
+  target edit (ADR-0001, ADR-0003) is the known case. The old value must leave no copy, and
+  that code runs the same checkpoint after it writes.
+- `tests/deleted-leaves-nothing.test.ts` pins this with a byte scan of the main, `-wal`,
+  `-shm` and `-journal` files. The scan runs while the database is open and again after it
+  closes. It fails blind if it cannot see the link before the delete.
+
+## Consequences
+
+- Every write zeroes the space it frees, which costs some extra I/O. A delete also costs
+  a checkpoint. Deletes are rare, and the whole database is a few tables for one team.
+- A truncating checkpoint cannot finish while another connection is reading an older
+  snapshot. It first waits out the busy timeout (5 s by default in better-sqlite3), and
+  then reports busy rather than throwing. The WAL copy then stays until the next
+  truncating checkpoint, the connection closing, or WAL reuse happening to overwrite it.
+  SQLite's own automatic checkpoints are passive and do not truncate. `deleteLink`
+  checks the result and throws when the checkpoint was busy. The delete has still
+  happened, but the caller learns that the old bytes remain.
+  `tests/deleted-leaves-nothing.test.ts` holds a second reader open to pin that. One
+  process holds the database (ADR-0006), `src/db/open.ts` opens it on one connection,
+  and better-sqlite3 is synchronous. So as long as the service opens the file once, no
+  other reader is open when `deleteLink` runs.
+- The checkpoint cannot run inside a transaction. There SQLite refuses it with
+  `SQLITE_LOCKED`, and better-sqlite3's `db.transaction()` wrapper rolls the delete back
+  when that error escapes. So `deleteLink` refuses to start inside one, and a caller that
+  wraps a delete in a transaction must checkpoint after the commit instead.
+- This does not cover copies outside the service's own files: backups a team takes, or the
+  file system's own handling of freed blocks on the disk. The privacy page's scope is the
+  service, as ADR-0004 says.
+- Alternatives considered:
+  - **Rewording the page** to say leftovers may remain until overwritten. It is honest but
+    weakens the promise, and "tied to no name" would stay false for an unknowable time.
+  - **Running `VACUUM` after each delete.** It also removes the leftovers, but it rewrites
+    the whole file each time and still needs the checkpoint for the WAL.
+  - **Leaving WAL mode.** ADR-0006 chose WAL mode, and leaving it would not remove the
+    freed-page leftovers on its own.

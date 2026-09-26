@@ -77,9 +77,24 @@ export function getLinkByName(db: Database, name: string): Link | undefined {
  * Deletes the link's row and nothing else: its daily counts stay under its id, which
  * AUTOINCREMENT never hands to another link (ADR-0003, ADR-0004). Returns whether a
  * link by that name existed.
+ *
+ * It must not run inside a transaction: SQLite refuses the checkpoint that follows the
+ * delete there (SQLITE_LOCKED), and db.transaction() would then roll the delete back. It
+ * throws after deleting when the checkpoint could not finish, because the link's old
+ * bytes are then still in the WAL.
  */
 export function deleteLink(db: Database, name: string): boolean {
-  return db.prepare("DELETE FROM links WHERE name = ?").run(name).changes > 0;
+  if (db.inTransaction) throw new Error("deleteLink cannot run inside a transaction (ADR-0012)");
+  const deleted = db.prepare("DELETE FROM links WHERE name = ?").run(name).changes > 0;
+  if (!deleted) return false;
+  // The WAL still holds the page as it was before the delete; copying it into the main
+  // file (where secure_delete has zeroed the row) and truncating it removes that copy
+  // (ADR-0012).
+  const [result] = db.pragma("wal_checkpoint(TRUNCATE)") as { busy: number }[];
+  if (result?.busy !== 0) {
+    throw new Error("the link was deleted, but another connection kept the WAL from being truncated, so its old bytes remain there (ADR-0012)");
+  }
+  return true;
 }
 
 /** One use of a link: that UTC day's count for it goes up by one, in a single upsert. */
