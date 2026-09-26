@@ -105,6 +105,22 @@ describe("R-014 the team key", () => {
     expect([res.statusCode, res.body]).toEqual([200, "deleted"]);
   });
 
+  test("R-014: only /-/health itself is open, not routes that start like it", async () => {
+    const { app } = guarded();
+    app.get("/-/healthz", async () => "no");
+    app.get("/-/health/details", async () => "no");
+    for (const url of ["/-/healthz", "/-/health/details"]) {
+      expectRefused(await app.inject({ method: "GET", url }));
+    }
+  });
+
+  test("R-014: HEAD on a guarded route is refused too", async () => {
+    const { app, ran } = guarded();
+    const res = await app.inject({ method: "HEAD", url: "/-/stats" });
+    expect([res.statusCode, res.headers["www-authenticate"]]).toEqual([401, CHALLENGE]);
+    expect(ran.count).toBe(0);
+  });
+
   test("health answers without the key and says nothing else", async () => {
     const { app } = guarded();
     const res = await app.inject({ method: "GET", url: "/-/health" });
@@ -113,9 +129,9 @@ describe("R-014 the team key", () => {
     expect(res.headers["set-cookie"]).toBeUndefined();
   });
 
-  test("an app cannot be built without a key", () => {
-    for (const key of ["", "   "]) {
-      expect(() => buildApp({ links: new MemoryLinks(), key })).toThrow("the team key is empty");
+  test("an app cannot be built without a usable key", () => {
+    for (const key of ["", "   ", `${TEST_KEY}\n`]) {
+      expect(() => buildApp({ links: new MemoryLinks(), key })).toThrow("an app cannot be built without a usable one");
     }
   });
 });

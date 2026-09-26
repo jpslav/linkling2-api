@@ -3,6 +3,7 @@
 import type { FastifyInstance, FastifyListenOptions } from "fastify";
 import { buildApp } from "./app.js";
 import type { LinkLookup } from "./links.js";
+import { keyProblem } from "./team-key.js";
 
 export interface StartIo {
   stderr: (line: string) => void;
@@ -11,13 +12,16 @@ export interface StartIo {
   listen: FastifyListenOptions;
 }
 
-export const NO_KEY = "linkling: LINKLING_KEY is not set; the service will not start without the team key.";
+/** The line the service leaves with when LINKLING_KEY cannot be used, e.g. `is not set`. */
+export const refusal = (problem: string): string =>
+  `linkling: LINKLING_KEY ${problem}; the service will not start without a usable team key.`;
 
 /** Starts the service and returns it listening, or says why not and returns null. */
 export async function main(env: NodeJS.ProcessEnv, io: StartIo): Promise<FastifyInstance | null> {
   const key = env.LINKLING_KEY;
-  if (key === undefined || key.trim() === "") {
-    io.stderr(NO_KEY);
+  const problem = keyProblem(key);
+  if (key === undefined || problem !== null) {
+    io.stderr(refusal(problem ?? "is not set"));
     return null;
   }
   const app = buildApp({ links: await io.openLinks(), key });

@@ -1,7 +1,7 @@
 // The service refuses to start without the team key (ADR-0005).
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, test } from "vitest";
-import { main, NO_KEY, type StartIo } from "../src/server.js";
+import { main, refusal, type StartIo } from "../src/server.js";
 import { MemoryLinks } from "./support/memory-links.js";
 import { TEST_KEY } from "./support/team-key.js";
 
@@ -26,10 +26,19 @@ function io() {
 
 describe("startup", () => {
   test("refuses to start without LINKLING_KEY, before it opens the store", async () => {
-    for (const env of [{}, { LINKLING_KEY: "" }, { LINKLING_KEY: "   " }]) {
+    for (const env of [{}, { LINKLING_KEY: "" }]) {
       const { start, said, opened } = io();
       expect(await main(env, start)).toBeNull();
-      expect(said).toEqual([NO_KEY]);
+      expect(said).toEqual([refusal("is not set")]);
+      expect(opened.count).toBe(0);
+    }
+  });
+
+  test("refuses a key that could not be sent as Bearer: spaces, line breaks, non-ASCII", async () => {
+    for (const key of ["   ", `${TEST_KEY}\n`, ` ${TEST_KEY}`, "two words", "clé-secrète"]) {
+      const { start, said, opened } = io();
+      expect(await main({ LINKLING_KEY: key }, start)).toBeNull();
+      expect(said).toEqual([refusal("must be printable ASCII with no spaces or line breaks")]);
       expect(opened.count).toBe(0);
     }
   });

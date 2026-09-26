@@ -19,6 +19,17 @@ export function keyFromAuthorization(header: string | undefined): string | null 
   return colon === -1 ? null : decoded.slice(colon + 1);
 }
 
+/**
+ * Why a key cannot be used, or null when it can. A key must be printable ASCII with no
+ * spaces: Node trims header values and reads them as latin1, so a trailing newline or a
+ * non-ASCII character would make a key that works as the Basic password but never as Bearer.
+ */
+export function keyProblem(key: string | undefined): string | null {
+  if (key === undefined || key === "") return "is not set";
+  if (!/^[\x21-\x7e]+$/.test(key)) return "must be printable ASCII with no spaces or line breaks";
+  return null;
+}
+
 function digest(key: string): Buffer {
   return createHash("sha256").update(key, "utf8").digest();
 }
@@ -28,7 +39,8 @@ function digest(key: string): Buffer {
  * neither the content nor the length of a wrong key shortens the comparison.
  */
 export function keyChecker(key: string): (given: string | null) => boolean {
-  if (key.trim() === "") throw new Error("the team key is empty; an app without one is unguarded");
+  const problem = keyProblem(key);
+  if (problem !== null) throw new Error(`the team key ${problem}; an app cannot be built without a usable one`);
   const expected = digest(key);
   return (given) => given !== null && timingSafeEqual(digest(given), expected);
 }
