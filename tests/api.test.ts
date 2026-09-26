@@ -52,6 +52,9 @@ describe("a body the API cannot use is refused with a 400 and stores nothing", (
     ["made_by not a string", { url, made_by: 5 }, "made_by"],
     ["made_by too long", { url, made_by: "x".repeat(65) }, "made_by"],
     ["made_by with a line break", { url, made_by: "a\nb" }, "made_by"],
+    ["made_by with a C1 control", { url, made_by: "a\u0085b" }, "made_by"],
+    ["made_by with a right-to-left override", { url, made_by: "a‮b" }, "made_by"],
+    ["made_by with a line separator", { url, made_by: "a b" }, "made_by"],
     ["expires a word", { url, expires: "tomorrow" }, "expires"],
     ["expires not a real date", { url, expires: "2026-02-30" }, "expires"],
     ["expires a zero lifetime", { url, expires: "0d" }, "expires"],
@@ -96,7 +99,26 @@ describe("a body the API cannot use is refused with a 400 and stores nothing", (
       payload: "<url>https://example.com/a</url>",
     });
     expect([xml.statusCode, xml.json().error]).toEqual([415, "send the body as application/json"]);
+    const empty = await app.inject({
+      method: "POST",
+      url: "/-/api/links",
+      headers: { authorization: `Bearer ${TEST_KEY}`, "content-type": "application/json" },
+      payload: "",
+    });
+    expect([empty.statusCode, empty.json().error]).toEqual([400, "the body must be a JSON object"]);
     expect(app.logged).toEqual([]);
+  });
+
+  test("a DELETE sent with a JSON content type and no body still deletes", async () => {
+    const links = tempLinks();
+    seed(links, "q3-plan", "https://example.com/q3");
+    const res = await appWith(links).inject({
+      method: "DELETE",
+      url: "/-/api/links/q3-plan",
+      headers: { authorization: `Bearer ${TEST_KEY}`, "content-type": "application/json" },
+    });
+    expect(res.statusCode).toBe(204);
+    expect(links.get("q3-plan")).toBeNull();
   });
 });
 
@@ -129,10 +151,20 @@ describe("listing and reading links", () => {
     const app = appWith(links);
     const res = await apiCall(app, "GET", "/-/api/links/Q3-Plan");
     expect([res.statusCode, res.json().name, res.json().url]).toEqual([200, "q3-plan", "https://example.com/q3"]);
-    for (const url of ["/-/api/links/nope", "/-/api/links/-x", "/-/api/links/a_b"]) {
+    for (const url of [
+      "/-/api/links/nope",
+      "/-/api/links/-x",
+      "/-/api/links/a_b",
+      "/-/api/links/q3%", // a malformed escape, which Fastify reports before routing
+      `/-/api/links/${"x".repeat(101)}`, // past Fastify's maxParamLength
+      `/-/api/links/${"x".repeat(101)}/counts`,
+      "/-/api/nothing-here",
+    ]) {
       const missing = await apiCall(app, "GET", url);
-      expect([missing.statusCode, typeof missing.json().error]).toEqual([404, "string"]);
+      expect([url, missing.statusCode, typeof missing.json().error]).toEqual([url, 404, "string"]);
     }
+    const put = await app.inject({ method: "PUT", url: "/-/api/links/q3-plan" });
+    expect([put.statusCode, typeof put.json().error]).toEqual([404, "string"]);
   });
 
   test("API answers are not cached", async () => {

@@ -20,9 +20,15 @@ blind() {
   exit 2
 }
 
+# A budget or count that is not a whole number would make every comparison below meaningless.
+[[ "$FOLLOWS" =~ ^[1-9][0-9]*$ ]] || blind "LATENCY_FOLLOWS must be a whole number of at least 1, not '$FOLLOWS'"
+[[ "$BUDGET_MS" =~ ^[0-9]+$ ]] || blind "LATENCY_BUDGET_MS must be a whole number of milliseconds, not '$BUDGET_MS'"
 [ -n "${LINKLING_BASE:-}" ] || blind "LINKLING_BASE is not set"
 [ -n "${LINKLING_KEY:-}" ] || blind "LINKLING_KEY is not set"
 command -v curl >/dev/null || blind "curl is not installed"
+
+# A service that takes the connection and never answers must end in BLIND or FAIL, not hang.
+curl() { command curl --max-time 5 "$@"; }
 
 health=$(curl -s -o /dev/null -w '%{http_code}' "$LINKLING_BASE/-/health")
 [ "$health" = 200 ] || blind "$LINKLING_BASE/-/health answered '$health', not 200"
@@ -49,10 +55,13 @@ if [ "$not_302" -gt 0 ]; then
 fi
 
 # The nearest-rank p95: the value at position ceil(0.95 * n) of the sorted times.
-p95_ms=$(awk '{print $2 * 1000}' "$times" | sort -n | awk -v n="$FOLLOWS" '
+# n is the number of times measured, never the number asked for.
+p95_ms=$(awk '{print $2 * 1000}' "$times" | sort -n | awk '
   { t[NR] = $1 }
-  END { r = int(0.95 * n); if (r < 0.95 * n) r++; printf "%.1f", t[r] }')
-echo "p95 ${p95_ms} ms over $FOLLOWS follows of /$name (budget ${BUDGET_MS} ms)"
+  END { r = int(0.95 * NR); if (r < 0.95 * NR) r++; printf "%.1f", t[r] }')
+measured=$(wc -l <"$times" | tr -d ' ')
+[ "$measured" = "$FOLLOWS" ] || blind "measured $measured follows of /$name, not $FOLLOWS"
+echo "p95 ${p95_ms} ms over $measured follows of /$name (budget ${BUDGET_MS} ms)"
 if awk -v p="$p95_ms" -v b="$BUDGET_MS" 'BEGIN { exit !(p > b) }'; then
   echo "LATENCY FAIL: p95 ${p95_ms} ms is over ${BUDGET_MS} ms"
   exit 1

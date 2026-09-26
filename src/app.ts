@@ -63,10 +63,28 @@ export function buildApp({
     // A malformed percent-escape (Fastify's JSON 400 by default) and a segment over
     // Fastify's 100-character maxParamLength (its JSON 414) are not names either: the
     // same plain 404. Anything else Fastify reports here is its own fault, not the URL's.
-    frameworkErrors: (error, _request, reply) => {
+    frameworkErrors: (error, request, reply) => {
       const notAName = error.code === "FST_ERR_BAD_URL" || error.code === "FST_ERR_MAX_PARAM_LENGTH";
-      void (notAName ? plainPage(reply, 404, "No such link.") : plainPage(reply, 500, "Something went wrong."));
+      void (notAName ? notFound(request.url, reply) : plainPage(reply, 500, "Something went wrong."));
     },
+  });
+
+  // A client of the API gets its 404 as JSON like every other API answer, a browser the
+  // plain page. Only the answer's format follows the URL's text; nothing is guarded by it.
+  function notFound(url: string, reply: FastifyReply): FastifyReply {
+    if (url.startsWith("/-/api/")) return sendJson(reply, 404, { error: "no such link or route" });
+    return plainPage(reply, 404, "No such link.");
+  }
+
+  // JSON bodies as Fastify parses them, except that an empty one is no body at all: a
+  // client that sends `Content-Type: application/json` on every call can still DELETE.
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => {
+    if (body === "") return done(null, undefined);
+    try {
+      done(null, JSON.parse(body as string));
+    } catch {
+      done(Object.assign(new Error("the body is not valid JSON"), { statusCode: 400 }), undefined);
+    }
   });
 
   // The shape is enforced where routes are made. The root holds exactly the routes
@@ -144,7 +162,7 @@ export function buildApp({
     return plainPage(reply, status, status === 500 ? "Something went wrong." : "Bad request.");
   });
 
-  app.setNotFoundHandler(async (_request, reply) => plainPage(reply, 404, "No such link."));
+  app.setNotFoundHandler(async (request, reply) => notFound(request.url, reply));
 
   return app;
 }

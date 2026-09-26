@@ -16,7 +16,10 @@ export interface MakeRequest {
 
 const MAX_URL = 2048;
 const MAX_MADE_BY = 64;
-const CONTROL = /[\u0000-\u001f\u007f]/;
+// Control characters (C0 and C1), invisible format characters such as right-to-left
+// overrides, and Unicode line and paragraph separators: none belongs in a name shown on
+// the stats page or printed by the CLI.
+const CONTROL = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const LIFETIME = /^([1-9]\d{0,5})([smhd])$/;
 const UNIT_MS = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 } as const;
