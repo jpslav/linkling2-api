@@ -21,6 +21,7 @@ it; `docker compose down -v` deletes every link and count.
 | Variable | Default | What it is |
 |---|---|---|
 | `LINKLING_KEY` | none, required | The one team key (ADR-0005) |
+| `LINKLING_SITE` | none | The public site's address; the stats page's Privacy link goes to its `/privacy.html` (ADR-0015) |
 | `PORT_BASE` | `8080` | The host port compose publishes the service on |
 | `LINKLING_DATA` | `/data` in the image, `./data` otherwise | The directory holding `linkling.db` |
 | `PORT` | `8080` | The port the process listens on inside the container |
@@ -43,6 +44,15 @@ that day's unwritten counts, and `docker compose down` does not.
 name answers a plain `404` page, and an expired one a plain `410` page. Every `GET` that
 redirects counts once toward that UTC day. `HEAD`, `404` and `410` do not count, and chat
 apps' link previews do (R-029).
+
+## The stats page
+
+`http://<host>/-/stats` lists every link, busiest over the last 14 UTC days first, with
+its 14-day line and total; a filter box narrows it as you type, and expired links stay,
+greyed. The browser asks for the team key: any user name, the key as the password. It sets
+no cookie and loads nothing but its own `/-/stats.css` and `/-/stats.js` (ADR-0015). Its
+Privacy link goes to `$LINKLING_SITE/privacy.html`, or, while `LINKLING_SITE` is unset, to
+that page's source in the public site's repo.
 
 ## The API
 
@@ -76,7 +86,7 @@ curl -s -X POST http://localhost:8080/-/api/links \
 ## The `linkling` command
 
 Everything the API does, from a terminal, with only Node and the team key. It is this
-package's `bin`, so it is built and installed from here (ADR-0007, [ADR-0015](docs/adr/0015-linkling-command.md)):
+package's `bin`, so it is built and installed from here (ADR-0007, [ADR-0016](docs/adr/0016-linkling-command.md)):
 
 ```bash
 npm ci && npm run build && npm install -g .    # npm links this folder: keep it, and dist/, in place

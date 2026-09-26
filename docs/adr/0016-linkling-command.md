@@ -1,4 +1,4 @@
-# ADR-0015 — The linkling command: commands, environment, output and exit codes that scripts can rely on
+# ADR-0016 — The linkling command: commands, environment, output and exit codes that scripts can rely on
 
 - Status: Accepted
 - Approver: claude

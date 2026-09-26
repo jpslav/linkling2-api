@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // The `linkling` command: everything the team API does (ADR-0013), from a terminal. It is
-// this package's `bin`, installed with `npm install -g` (ADR-0007, ADR-0015).
+// this package's `bin`, installed with `npm install -g` (ADR-0007, ADR-0016).
 //
 // It imports only `node:` modules and `keyProblem`, which itself imports only `node:crypto`,
 // so starting it never loads Fastify or better-sqlite3 (tests/cli-bin.test.ts walks the imports).
@@ -10,7 +10,7 @@ import { userInfo } from "node:os";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 import { keyProblem } from "./team-key.js";
 
-/** What a run of the command ends with. Scripts, and demo.sh, rely on these (ADR-0015). */
+/** What a run of the command ends with. Scripts, and demo.sh, rely on these (ADR-0016). */
 export const EXIT = {
   ok: 0,
   /** The service understood the request and said no: a taken name, no such link, a bad value. */

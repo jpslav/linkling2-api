@@ -1,4 +1,4 @@
-// The `linkling` command (R-015, ADR-0015), run in-process against the real app. What each
+// The `linkling` command (R-015, ADR-0016), run in-process against the real app. What each
 // command prints, what each way of failing exits with, and that a service that is not there,
 // or not Linkling's, is a failure and never a pass. R-008's half is in tests/made-by.test.ts.
 import { readFileSync } from "node:fs";
@@ -9,7 +9,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { EXIT, TIMEOUT_MS, settings } from "../src/cli.js";
 import { MADE, seed } from "./support/app.js";
 import { linkling, stack } from "./support/cli.js";
-import { TEST_KEY } from "./support/team-key.js";
+import { bearer, TEST_KEY } from "./support/team-key.js";
 
 const NOW = () => MADE;
 
@@ -444,6 +444,29 @@ describe("no usable answer: exit 4, never 0", () => {
       out: "",
       err: "linkling: Something went wrong. (500)\n",
     });
+  });
+});
+
+describe("the stats page's own instructions (LL-008) are true of this command", () => {
+  test("the command it quotes runs as written, every flag it names is one make takes, and the README it points to says how", async () => {
+    const { app, base, run } = await stack();
+    const page = (await app.inject({ method: "GET", url: "/-/stats", headers: bearer(TEST_KEY) })).body;
+    const section = /<section id="make-a-link">([\s\S]*?)<\/section>/.exec(page)?.[1];
+    expect(section, "the stats page has no make-a-link section").toBeDefined();
+    const quoted = /<pre><code>linkling ([^<]+)<\/code>/.exec(section!)?.[1];
+    expect(quoted).toBe("make https://example.com/a/long/address --name q3-plan");
+    expect(await run(quoted!.split(" "))).toEqual({ code: 0, out: `${base}/q3-plan\n`, err: "" });
+
+    // An unknown flag would be exit 2, so exit 0 says make takes each one the page names.
+    const flags = [...section!.matchAll(/<code>(--[a-z]+)<\/code>/g)].map((match) => match[1]!);
+    expect(flags.sort()).toEqual(["--by", "--name"]);
+    for (const flag of flags) expect([flag, (await run(["make", "https://example.com/b", flag, "x"])).code]).toEqual([flag, 0]);
+
+    // "the README says how": the section that installs the command, and how an expiry is given.
+    const readme = readFileSync(join(import.meta.dirname, "..", "README.md"), "utf8");
+    expect(readme).toContain("## The `linkling` command");
+    expect(readme).toContain("npm install -g .");
+    expect(readme).toMatch(/`--expires`[^\n]*`7d`/);
   });
 });
 

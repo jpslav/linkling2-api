@@ -91,7 +91,7 @@ week_row=$(printf '%s\n' "$listing" | grep "^$week ")
 case "$plain_row" in *never*) ;; *) fail "a link made with no expiry did not list as never: '$plain_row'" ;; esac
 case "$week_row" in "") fail "the link made with --expires 7d is not listed" ;; *never*) fail "a link made with --expires 7d listed as never: '$week_row'" ;; esac
 
-# 4. The exit codes a script relies on (ADR-0015).
+# 4. The exit codes a script relies on (ADR-0016).
 expect_exit 1 "making a taken name" linkling make https://example.com/e2e --name "$plain"
 expect_exit 1 "deleting a link that is not there" linkling delete "e2e-no-such-link-$suffix"
 LINKLING_KEY="wrong-$suffix" expect_exit 3 "listing with a wrong key" linkling list
