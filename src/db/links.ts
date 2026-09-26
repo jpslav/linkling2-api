@@ -78,9 +78,10 @@ export function getLinkByName(db: Database, name: string): Link | undefined {
  * AUTOINCREMENT never hands to another link (ADR-0003, ADR-0004). Returns whether a
  * link by that name existed.
  *
- * It must not run inside a transaction: the checkpoint that follows the delete cannot run
- * there, and SQLite would roll the delete back with it. It throws after deleting when the
- * checkpoint could not finish, because the link's old bytes are then still in the WAL.
+ * It must not run inside a transaction: SQLite refuses the checkpoint that follows the
+ * delete there (SQLITE_LOCKED), and db.transaction() would then roll the delete back. It
+ * throws after deleting when the checkpoint could not finish, because the link's old
+ * bytes are then still in the WAL.
  */
 export function deleteLink(db: Database, name: string): boolean {
   if (db.inTransaction) throw new Error("deleteLink cannot run inside a transaction (ADR-0012)");

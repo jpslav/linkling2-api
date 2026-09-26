@@ -8,7 +8,8 @@
 //
 // It writes exactly five lines of its own: a canary through console.log, one straight to
 // descriptor 1, one through console.error and one straight to descriptor 2, all before
-// the app exists, and last a DONE line with the status codes it saw. Anything else in its output came from the app.
+// the app exists, and last a DONE line with the status codes it saw. Anything else in its
+// output came from the app.
 import { existsSync, writeSync } from "node:fs";
 import { request } from "node:http";
 import { connect } from "node:net";

@@ -38,12 +38,23 @@ path, `/privacy.html`, is ADR-0007's, not this one's.
   every entry's `fields` equals the database's columns, SQLite's own `sqlite_sequence`
   included. It also fails when a field or an id appears twice, or when an entry has no
   text. The text is not checked by the service. It is a promise, not a schema.
-- **What the page carries.** `linkling-web`'s `privacy.html` carries one `<tr
-  data-stored="<id>">` per entry, whose first two cells are `what` and `kept` word for
-  word. Two elements marked `data-manifest="counted"` and `data-manifest="logged"` carry
-  those two sentences. Before comparing, the check strips HTML comments and tags, decodes
-  entities and collapses whitespace. It fails on a missing row, a differing cell or a
-  missing statement. A row whose id the manifest lacks is a warning (ADR-0004).
+- **What the page carries.** `linkling-web`'s `privacy.html` carries exactly one `<tr
+  data-stored="<id>">` per entry. Each has exactly two cells, `what` and `kept`, word for
+  word. Exactly one element each, marked `data-manifest="counted"` and
+  `data-manifest="logged"`, carries those two sentences. The check does these steps in
+  order:
+  1. It removes comments and `template`, `script`, `style` and `noscript` elements.
+  2. It drops tags, decodes character references and collapses whitespace.
+  3. It compares.
+
+  It fails on:
+  - a missing, duplicated or differing row;
+  - a row with any number of cells other than two;
+  - a missing, duplicated or differing statement;
+  - any of those, or a table, marked `hidden`.
+
+  It warns on a row whose id the manifest lacks (ADR-0004), and on a body row with no id
+  at all. `linkling-web`'s `checks/privacy.mjs` header is the full list.
 - **Where the site reads it.** On a push to `main` and on the daily run, the check reads
   `linkling-api`'s `main`. On a pull request it first tries the `linkling-api` branch
   with the same name as the pull request's head branch. It falls back to `main` only when
@@ -61,9 +72,12 @@ path, `/privacy.html`, is ADR-0007's, not this one's.
   request merges first, the site's next push to `main` and its daily run read the
   service's `main`. They fail until the service's pull request merges, so the gap is
   visible, not silent.
-- Once the service's pull request merges, `delete_branch_on_merge` removes its branch.
-  The site's next run gets a 404 for the branch and reads `main`, so nothing is left
-  pointing at a branch.
+- Neither repo deletes a branch when its pull request merges. `delete_branch_on_merge`
+  is `false` on both (`gh api repos/jpslav/linkling2-api --jq .delete_branch_on_merge`).
+  So a merged service branch keeps answering the site's pull requests of that name until
+  someone deletes it. That is harmless while its manifest equals `main`'s. Delete the
+  service branch after it merges, and after that the site's runs get a 404 for it and
+  read `main`.
 - A site branch that happens to share a name with an unrelated `linkling-api` branch
   compares against that branch's manifest. If that manifest is missing the fetch is
   BLIND. If it is older or newer, the check may fail or warn about differences the site

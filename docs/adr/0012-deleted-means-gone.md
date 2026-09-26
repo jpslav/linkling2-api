@@ -12,12 +12,12 @@ no name". Principle `promises-literal` makes both claims about every byte the se
 stores, not only about what the API returns.
 
 SQLite does not work that way by default. A `DELETE` marks the row's space free and leaves
-its bytes where they were. In WAL mode (ADR-0006, `src/db/open.ts`), the page as it was
-before the delete also stays in the `-wal` file until that file is overwritten or
-truncated. LL-005's independent review of the privacy text found this. The new test
-`tests/deleted-leaves-nothing.test.ts` makes a link, deletes it, and scans the database
-files for its name, target and maker. On `main` it found all three, both while the
-database was open and after it was closed.
+its bytes where they were. In WAL mode (`src/db/open.ts` switches every file to it), the
+page as it was before the delete also stays in the `-wal` file until that file is
+overwritten or truncated. LL-005's independent review of the privacy text found this. The
+first version of `tests/deleted-leaves-nothing.test.ts` made a link, deleted it, and
+scanned the database files for its name, target and maker. Run against `main`, it found
+all three while the database was still open.
 
 This changes what is on disk. It changes nothing a team member, a clicker or a visitor
 sees, so it is Claude's. It keeps an existing promise rather than making a new one.
@@ -47,12 +47,14 @@ sees, so it is Claude's. It keeps an existing promise rather than making a new o
   SQLite's own automatic checkpoints are passive and do not truncate. `deleteLink`
   checks the result and throws when the checkpoint was busy. The delete has still
   happened, but the caller learns that the old bytes remain.
-  `tests/deleted-leaves-nothing.test.ts` holds a second reader open to pin that. The
-  service is one process on one connection (ADR-0006), and better-sqlite3 is
-  synchronous, so today no other reader is open when `deleteLink` runs.
-- The checkpoint cannot run inside a transaction. SQLite would throw `SQLITE_LOCKED`
-  there and roll the delete back with it. So `deleteLink` refuses to start inside one, and
-  a caller that wraps a delete in a transaction must checkpoint after the commit instead.
+  `tests/deleted-leaves-nothing.test.ts` holds a second reader open to pin that. One
+  process holds the database (ADR-0006), `src/db/open.ts` opens it on one connection,
+  and better-sqlite3 is synchronous. So as long as the service opens the file once, no
+  other reader is open when `deleteLink` runs.
+- The checkpoint cannot run inside a transaction. There SQLite refuses it with
+  `SQLITE_LOCKED`, and better-sqlite3's `db.transaction()` wrapper rolls the delete back
+  when that error escapes. So `deleteLink` refuses to start inside one, and a caller that
+  wraps a delete in a transaction must checkpoint after the commit instead.
 - This does not cover copies outside the service's own files: backups a team takes, or the
   file system's own handling of freed blocks on the disk. The privacy page's scope is the
   service, as ADR-0004 says.
