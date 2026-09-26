@@ -18,7 +18,8 @@ on the public site (PRODUCT.md "Contradictions"), but this run gives that site n
   through `LinkStore.dailyCounts` (ADR-0014). Every name, target and maker is HTML-escaped.
 - The page loads two files and nothing else: `/-/stats.css` and `/-/stats.js`, served by the
   same process from strings in `src/stats.ts`. All three routes sit under `/-/`, so the
-  team-key guard covers them without any change to `OPEN`. Each answer carries
+  team-key guard covers them without any change to `OPEN`. Each of the three, answered with
+  the key, carries
   `Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; …`,
   `Cache-Control: private, no-store` and `Referrer-Policy: no-referrer`.
 - Without the script every link is still listed; the script adds the filter and Copy, which

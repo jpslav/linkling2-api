@@ -22,7 +22,7 @@ export const DAYS = 14;
  */
 export const PRIVACY_FALLBACK = "https://github.com/jpslav/linkling2-web/blob/main/privacy.html";
 
-/** R-029: what a count includes, said on this page as on the privacy page. */
+/** R-029: what a count includes. The privacy page says it too, in privacy-manifest.json's `counted` text. */
 export const PREVIEW_SENTENCE =
   "Counts include the automatic fetch chat apps make to preview a pasted link.";
 
@@ -73,7 +73,7 @@ export interface StatsRow {
 export function statsRows(links: LinkStore, now: Date): StatsRow[] {
   const window = Array.from({ length: DAYS }, (_, i) => utcDay(new Date(now.getTime() - (DAYS - 1 - i) * 86_400_000)));
   const rows = links.list().map((link) => {
-    // Through the store, which adds today's follows not yet written (ADR-0014).
+    // Through the store, which adds the follows not yet written to disk (ADR-0014).
     const counted = new Map(links.dailyCounts(link.id).map(({ day, count }) => [day, count]));
     const days = window.map((day) => counted.get(day) ?? 0);
     return {
@@ -166,7 +166,7 @@ ${body}
 <h2>Make a link</h2>
 <p>From the command line, with the <code>linkling</code> command set up as the <a href="https://github.com/jpslav/linkling2-api#readme">linkling-api README</a> says:</p>
 <pre><code>linkling make https://example.com/a/long/address --name q3-plan</code></pre>
-<p>Leave out <code>--name</code> and Linkling makes one up. <code>--expires 7d</code> or <code>--expires 2026-10-03</code> sets when it stops working; <code>--by</code> sets the Made by name, which is otherwise your login name.</p>
+<p>Leave out <code>--name</code> and Linkling makes one up. <code>--by</code> sets the Made by name, which is otherwise your login name. A link can also be given an expiry, a date or a lifetime such as 7d; the README says how.</p>
 </section>
 </main>
 <footer><a href="${privacy}">Privacy</a> · <a href="#make-a-link">Make a link (CLI)</a></footer>

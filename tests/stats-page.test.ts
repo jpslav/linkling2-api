@@ -55,6 +55,7 @@ describe("R-010 the stats page lists every link", () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toBe("text/html; charset=utf-8");
     expect(res.headers["cache-control"]).toBe("private, no-store");
+    expect(res.headers["set-cookie"]).toBeUndefined();
     const html = res.body;
     expect(html).toContain("<h1>Linkling — our links</h1>");
     expect([...html.matchAll(/<th[^>]*>([^<]*)<\/th>/g)].map(([, th]) => th)).toEqual([

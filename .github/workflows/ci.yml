@@ -24,7 +24,7 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
-      # The stats page's filter test drives a real browser (ADR-0006, ADR-0015). Without it
-      # that test fails to launch; it never skips.
+      # The stats page's filter and Copy tests drive a real browser (ADR-0006, ADR-0015).
+      # Without it they fail to launch; they never skip.
       - run: npx playwright install --with-deps chromium
       - run: npm test
