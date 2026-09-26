@@ -2,22 +2,25 @@ import BetterSqlite3 from "better-sqlite3";
 import type { Database } from "better-sqlite3";
 import { migrate } from "./migrate.js";
 
-const WAL_ATTEMPTS = 50;
+const WAL_RETRY_WINDOW_MS = 5000;
 const WAL_RETRY_MS = 100;
 
 /**
  * Switching a new file to WAL needs a lock SQLite's busy timeout does not wait for,
  * so a second process opening the same fresh file at the same moment gets
- * SQLITE_BUSY at once. Retry for up to about five seconds, then give up.
+ * SQLITE_BUSY at once. Retry until five seconds have passed, then give up. The
+ * window is time, not a count of attempts, because an attempt can itself wait out
+ * the busy timeout when another connection holds an exclusive lock.
  */
 function enableWal(db: Database): void {
-  for (let attempt = 1; ; attempt++) {
+  const deadline = Date.now() + WAL_RETRY_WINDOW_MS;
+  for (;;) {
     try {
       const mode = db.pragma("journal_mode = WAL", { simple: true });
       if (mode !== "wal") throw new Error(`journal_mode is ${String(mode)}, not wal`);
       return;
     } catch (err) {
-      if ((err as { code?: unknown }).code !== "SQLITE_BUSY" || attempt >= WAL_ATTEMPTS) throw err;
+      if ((err as { code?: unknown }).code !== "SQLITE_BUSY" || Date.now() >= deadline) throw err;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, WAL_RETRY_MS);
     }
   }
