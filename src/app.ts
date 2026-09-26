@@ -28,14 +28,10 @@ export function buildApp({ links, now = () => new Date() }: AppDeps): FastifyIns
   const app = Fastify({
     // No request log: the default line carries the clicker's address (ADR-0006).
     logger: false,
-    routerOptions: {
-      ignoreTrailingSlash: true,
-      // Fastify answers a longer segment with its own JSON 414; let every one reach
-      // /:name, which refuses anything over 64 characters with the plain 404.
-      maxParamLength: 16_384,
-    },
-    // A malformed percent-escape is not a name either: the same plain 404, not a JSON 400.
-    // Anything else Fastify reports here is its own fault, not the URL's.
+    routerOptions: { ignoreTrailingSlash: true },
+    // A malformed percent-escape (Fastify's JSON 400 by default) and a segment over
+    // Fastify's 100-character maxParamLength (its JSON 414) are not names either: the
+    // same plain 404. Anything else Fastify reports here is its own fault, not the URL's.
     frameworkErrors: (error, _request, reply) => {
       const notAName = error.code === "FST_ERR_BAD_URL" || error.code === "FST_ERR_MAX_PARAM_LENGTH";
       void (notAName ? plainPage(reply, 404, "No such link.") : plainPage(reply, 500, "Something went wrong."));

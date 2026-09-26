@@ -49,7 +49,8 @@ describe("R-002 made-up names", () => {
     for (let i = 0; i < draws / 6; i++) {
       for (const c of makeUpName()) counts.set(c, (counts.get(c) ?? 0) + 1);
     }
-    // Chi-squared over 31 letters (30 degrees of freedom); 80 is past the 1-in-a-million tail.
+    // Chi-squared over 31 letters (30 degrees of freedom); a fair source exceeds 80 about
+    // once in 500,000 runs (P ≈ 2.0e-6).
     const expected = (Math.floor(draws / 6) * 6) / 31;
     let chi2 = 0;
     for (const c of MADE_UP_ALPHABET) chi2 += ((counts.get(c) ?? 0) - expected) ** 2 / expected;

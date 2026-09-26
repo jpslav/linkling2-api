@@ -6,8 +6,9 @@ import { afterEach, describe, expect, test } from "vitest";
 import { buildApp } from "../src/app.js";
 import { MemoryLinks } from "./support/memory-links.js";
 
-// ADR-0009: every header a live redirect may carry. The first three are ADR-0002's;
-// the rest are written by Node's HTTP server on every response.
+// ADR-0009: every header a live redirect may carry, as Node's own client (keep-alive by
+// default) receives them. Location, Cache-Control and Referrer-Policy are ADR-0002's;
+// the rest are written by Node's HTTP server.
 const REDIRECT_HEADERS = [
   "cache-control",
   "connection",
