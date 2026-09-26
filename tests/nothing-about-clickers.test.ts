@@ -60,8 +60,8 @@ test("following links writes no log line and stores nothing about the clicker", 
   expect(status, output).toBe(0);
   // Through inject: 302 for the link, 404 unknown, 410 expired, 500 store failure, 404 bad
   // escape, 404 /-/. Over a socket: 302 for the link, 400 for a request line that is not HTTP.
-  // A cookie on any response, or a follow that wrote to the database, would appear in this
-  // line too.
+  // A cookie on any response, or the two follows of q3-plan not reaching the database file
+  // scanned below, would appear in this line too.
   expect(stdout).toContain(DONE);
 
   // No request log: the child's own lines are the whole output.

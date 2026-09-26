@@ -14,4 +14,5 @@
 | [0011](0011-privacy-manifest-contract.md) | The privacy manifest carries the page's wording, and the site's check reads it from a same-named branch on a pull request, else main | Accepted |
 | [0012](0012-deleted-means-gone.md) | Deleted link data is overwritten, not just unlisted: secure_delete is on and the WAL is truncated after a delete | Accepted |
 | [0013](0013-team-api.md) | The team API under /-/api/: routes, JSON fields and errors | Accepted |
+| [0014](0014-counts-written-daily.md) | A click touches no file; the day's counts are written once, after the day | Accepted |
 <!-- adr-index:end -->

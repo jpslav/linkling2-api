@@ -12,11 +12,6 @@ export interface AppDeps {
   /** The one team key (ADR-0005). Every `/-/` route but those in OPEN asks for it. */
   key: string;
   now?: () => Date;
-  /**
-   * Where the service's own lines go. It is only ever handed a method, a route pattern and
-   * a status (ADR-0004): never a URL, a header, an address or a store's error message.
-   */
-  log?: (line: string) => void;
   /** The source of made-up names; a cryptographic one unless a test scripts it. */
   randomIndex?: RandomIndex;
 }
@@ -54,7 +49,6 @@ export function buildApp({
   links,
   key,
   now = () => new Date(),
-  log = (line) => console.error(line),
   randomIndex,
 }: AppDeps): FastifyInstance {
   const isTeamKey = keyChecker(key);
@@ -124,9 +118,9 @@ export function buildApp({
     try {
       link = name === null ? null : await links.lookup(name);
     } catch {
-      // Whatever the store says went wrong is not the clicker's to read, and its message is
-      // not logged either: it can carry anything the store was handed (ADR-0004).
-      log(`linkling: ${request.method} /:name answered 500`);
+      // Whatever the store says went wrong is not the clicker's to read. Nor is it logged:
+      // handling a request writes nothing about it to any log (privacy-manifest.json), and
+      // a log line's own timestamp would say when someone clicked.
       return plainPage(reply, 500, "Something went wrong.");
     }
     if (link === null) return plainPage(reply, 404, "No such link.");
@@ -136,8 +130,8 @@ export function buildApp({
       try {
         await links.countFollow(link.id, at);
       } catch {
-        // The clicker still gets their link; the tally is the team's loss, and says so.
-        log("linkling: GET /:name count not written");
+        // The clicker still gets their link; a count that could not be taken is the team's
+        // loss, and it goes unlogged for the same reason as above.
       }
     }
     // The request's query string is deliberately not passed on (ADR-0001).
@@ -152,12 +146,12 @@ export function buildApp({
   registerApi(app, { links, now, randomIndex });
 
   // Anything a handler throws, and anything Fastify refuses before one runs (a body that is
-  // not JSON, say). A server fault is logged as its method, route pattern and status only.
+  // not JSON, say). Nothing is logged, as above; a failing database shows as the 500s the
+  // team gets from the API.
   app.setErrorHandler((error: { statusCode?: number }, request, reply) => {
     const code = error.statusCode;
     const status = code !== undefined && code >= 400 && code < 500 ? code : 500;
     const route = request.routeOptions.url;
-    if (status === 500) log(`linkling: ${request.method} ${route ?? "(no route)"} answered 500`);
     if (route?.startsWith("/-/api/")) {
       const error = status === 500 ? "Something went wrong." : (CLIENT_ERRORS[status] ?? "the request could not be read");
       return sendJson(reply, status, { error });

@@ -67,7 +67,7 @@ describe("R-018 gone links", () => {
     expect(lookup).not.toHaveBeenCalled();
   });
 
-  test("a store that fails answers a plain 500, and logs its route and status and nothing else", async () => {
+  test("a store that fails answers a plain 500, and writes nothing to any log", async () => {
     const links = tempLinks();
     links.lookup = () => Promise.reject(new Error("SQLITE_BUSY at /data/linkling.db canary-9d1e"));
     const app = appWith(links);
@@ -77,6 +77,6 @@ describe("R-018 gone links", () => {
       headers: { "user-agent": "ClickerBrowser/1.0", referer: "https://chat.example/room" },
     });
     expectPlainPage(res, 500, "Something went wrong.\n");
-    expect(app.logged).toEqual(["linkling: GET /:name answered 500"]);
+    expect(app.logged).toEqual([]);
   });
 });

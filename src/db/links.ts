@@ -84,15 +84,32 @@ export function listLinks(db: Database): Link[] {
 /**
  * Points the link at a new target and changes nothing else: its name, maker, expiry and
  * counts stay (ADR-0001). Returns the link as it now is, or undefined when there is none.
+ *
+ * The old target is overwritten data, so ADR-0012's rule holds here as for a delete: it
+ * must not run inside a transaction, and it throws after the edit when the checkpoint that
+ * removes the old target's copy from the WAL could not finish.
  */
 export function setTarget(db: Database, name: string, target: string): Link | undefined {
+  if (db.inTransaction) throw new Error("setTarget cannot run inside a transaction (ADR-0012)");
   const row = db
     .prepare<[string, string], LinkRow>(
       `UPDATE links SET target = ? WHERE name = ?
        RETURNING id, name, target, made_by, created_at, expires_at`,
     )
     .get(target, name);
-  return row === undefined ? undefined : toLink(row);
+  if (row === undefined) return undefined;
+  truncateWal(db, "the link's target was changed, but another connection kept the WAL from being truncated, so the old target remains there (ADR-0012)");
+  return toLink(row);
+}
+
+/**
+ * Copies the WAL into the main file (where secure_delete has zeroed what was freed) and
+ * empties it, so the WAL keeps no copy of pages as they were before the last write
+ * (ADR-0012). Throws `busyMessage` when another connection kept it from finishing.
+ */
+function truncateWal(db: Database, busyMessage: string): void {
+  const [result] = db.pragma("wal_checkpoint(TRUNCATE)") as { busy: number }[];
+  if (result?.busy !== 0) throw new Error(busyMessage);
 }
 
 /**
@@ -109,13 +126,8 @@ export function deleteLink(db: Database, name: string): boolean {
   if (db.inTransaction) throw new Error("deleteLink cannot run inside a transaction (ADR-0012)");
   const deleted = db.prepare("DELETE FROM links WHERE name = ?").run(name).changes > 0;
   if (!deleted) return false;
-  // The WAL still holds the page as it was before the delete; copying it into the main
-  // file (where secure_delete has zeroed the row) and truncating it removes that copy
-  // (ADR-0012).
-  const [result] = db.pragma("wal_checkpoint(TRUNCATE)") as { busy: number }[];
-  if (result?.busy !== 0) {
-    throw new Error("the link was deleted, but another connection kept the WAL from being truncated, so its old bytes remain there (ADR-0012)");
-  }
+  // The WAL still holds the page as it was before the delete.
+  truncateWal(db, "the link was deleted, but another connection kept the WAL from being truncated, so its old bytes remain there (ADR-0012)");
   return true;
 }
 

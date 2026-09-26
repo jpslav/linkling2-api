@@ -1,4 +1,5 @@
 // A team member fixes where a link points (R-028): the target changes in place.
+import BetterSqlite3 from "better-sqlite3";
 import { describe, expect, test } from "vitest";
 import { apiCall, appWith, countRows, seed, tempLinks } from "./support/app.js";
 
@@ -22,6 +23,26 @@ describe("R-028 edit a link's target", () => {
     const counts = await apiCall(app, "GET", "/-/api/links/q3-plan/counts");
     expect(counts.json().total).toBe(3);
     expect(links.get("q3-plan")).toMatchObject({ id: link.id, madeBy: "ana", createdAt: link.createdAt });
+  });
+
+  test("an edit whose old target could not be cleared from the WAL still reaches the next click", async () => {
+    const links = tempLinks();
+    seed(links, "q3-plan", "https://example.com/wrong");
+    // A reader holding an older snapshot keeps the checkpoint after the edit from truncating.
+    const reader = new BetterSqlite3(links.db.name, { timeout: 0 });
+    links.db.pragma("busy_timeout = 0");
+    try {
+      reader.exec("BEGIN");
+      reader.prepare("SELECT count(*) FROM links").get();
+      const app = appWith(links);
+      const res = await apiCall(app, "PATCH", "/-/api/links/q3-plan", { url: "https://example.com/right" });
+      expect(res.statusCode).toBe(500);
+      expect(app.logged).toEqual([]);
+      const follow = await app.inject({ method: "GET", url: "/q3-plan" });
+      expect([follow.statusCode, follow.headers.location]).toEqual([302, "https://example.com/right"]);
+    } finally {
+      reader.close();
+    }
   });
 
   test("an edit reaches the link by its name in any case", async () => {

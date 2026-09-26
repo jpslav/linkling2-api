@@ -1,5 +1,6 @@
 // The app over a real SQLite file, as the service runs it, for tests of the HTTP layer.
 import type { LightMyRequestResponse } from "fastify";
+import { afterEach, beforeEach } from "vitest";
 import { buildApp, type AppDeps } from "../../src/app.js";
 import type { NewLink } from "../../src/db/links.js";
 import { SqliteLinks, type StoredLink } from "../../src/store.js";
@@ -33,11 +34,35 @@ export function linkTo(name: string, target: string): SqliteLinks {
   return links;
 }
 
-/** The app over `links`, logging into `logged` rather than to stderr. */
+// Everything written to stderr or stdout while an app from appWith is in use, whether through
+// console or the stream itself; the service handling a request writes nothing about it
+// (privacy-manifest.json), so tests expect this to stay empty.
+let written: string[] = [];
+const originals = { out: process.stdout.write, err: process.stderr.write, error: console.error, log: console.log };
+beforeEach(() => {
+  written = [];
+});
+afterEach(() => {
+  Object.assign(process.stdout, { write: originals.out });
+  Object.assign(process.stderr, { write: originals.err });
+  Object.assign(console, { error: originals.error, log: originals.log });
+});
+
+function capture(): string[] {
+  const take = (chunk: unknown): boolean => {
+    written.push(String(chunk));
+    return true;
+  };
+  Object.assign(process.stdout, { write: take });
+  Object.assign(process.stderr, { write: take });
+  Object.assign(console, { error: take, log: take });
+  return written;
+}
+
+/** The app over `links`, with `logged` holding anything written to stdout or stderr since. */
 export function appWith(links: SqliteLinks = tempLinks(), deps: Partial<AppDeps> = {}) {
-  const logged: string[] = [];
-  const app = buildApp({ links, key: TEST_KEY, log: (line) => logged.push(line), ...deps });
-  return Object.assign(app, { logged, links });
+  const app = buildApp({ links, key: TEST_KEY, ...deps });
+  return Object.assign(app, { logged: capture(), links });
 }
 
 /** A team-key call to the API, with a JSON body when one is given. */

@@ -183,8 +183,8 @@ describe("listing and reading links", () => {
   });
 });
 
-describe("an API failure is logged as its route and status only (ADR-0004)", () => {
-  test("a store that throws answers a JSON 500 and logs one line without the error", async () => {
+describe("an API failure is answered, and logged nowhere (privacy-manifest.json)", () => {
+  test("a store that throws answers a JSON 500 and writes nothing to any log", async () => {
     const links = tempLinks();
     links.list = () => {
       throw new Error("SQLITE_CORRUPT canary-7f3a");
@@ -192,6 +192,6 @@ describe("an API failure is logged as its route and status only (ADR-0004)", () 
     const app = appWith(links);
     const res = await apiCall(app, "GET", "/-/api/links?who=203.0.113.9");
     expect([res.statusCode, res.json()]).toEqual([500, { error: "Something went wrong." }]);
-    expect(app.logged).toEqual(["linkling: GET /-/api/links answered 500"]);
+    expect(app.logged).toEqual([]);
   });
 });

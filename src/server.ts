@@ -28,7 +28,7 @@ export async function main(env: NodeJS.ProcessEnv, io: StartIo): Promise<Fastify
     io.stderr(refusal(problem ?? "is not set"));
     return null;
   }
-  const app = buildApp({ links: await io.openLinks(), key, log: io.stderr });
+  const app = buildApp({ links: await io.openLinks(), key });
   await app.listen(io.listen);
   return app;
 }
@@ -53,7 +53,8 @@ function flush(links: SqliteLinks, stderr: (line: string) => void): void {
   try {
     links.flushCounts();
   } catch {
-    // Nothing from the store's error: ADR-0004 logs a fault's place and nothing else.
+    // Nothing from the error: this runs from a timer or at shutdown, never for a request,
+    // and says only that the write failed.
     stderr("linkling: daily counts not written; kept for the next write");
   }
 }

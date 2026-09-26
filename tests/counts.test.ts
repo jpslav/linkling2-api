@@ -130,7 +130,7 @@ describe("R-009 counting follows through the redirect", () => {
     expect(countRows(links)).toEqual([{ link_id: live.id, day: "2026-09-26", count: 1 }]);
   });
 
-  test("a count that cannot be written still redirects, and logs the route only", async () => {
+  test("a count that cannot be taken still redirects, and writes nothing to any log", async () => {
     const links = tempLinks();
     seed(links, "q3-plan", "https://example.com/q3");
     links.countFollow = () => {
@@ -139,6 +139,6 @@ describe("R-009 counting follows through the redirect", () => {
     const app = appWith(links);
     const res = await app.inject({ method: "GET", url: "/q3-plan?who=203.0.113.9" });
     expect([res.statusCode, res.headers.location]).toEqual([302, "https://example.com/q3"]);
-    expect(app.logged).toEqual(["linkling: GET /:name count not written"]);
+    expect(app.logged).toEqual([]);
   });
 });

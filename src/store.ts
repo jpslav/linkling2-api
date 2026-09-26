@@ -51,7 +51,12 @@ export class SqliteLinks implements LinkStore {
   /** Follows not yet written: link id, then UTC day, then how many. */
   private readonly pending = new Map<number, Map<string, number>>();
 
-  constructor(readonly db: Database) {
+  // A plain field rather than a parameter property, which Node's type stripping refuses
+  // when tests/support/follow-a-link.mjs loads this file straight from source.
+  readonly db: Database;
+
+  constructor(db: Database) {
+    this.db = db;
     for (const link of listLinks(db)) this.byName.set(link.name, asLink(link));
   }
 
@@ -112,9 +117,14 @@ export class SqliteLinks implements LinkStore {
   }
 
   setTarget(name: string, target: string): StoredLink | null {
-    const link = setTarget(this.db, name, target) ?? null;
-    if (link !== null) this.byName.set(link.name, asLink(link));
-    return link;
+    try {
+      return setTarget(this.db, name, target) ?? null;
+    } finally {
+      // Read back rather than trusted: setTarget throws after the edit when the WAL could
+      // not be truncated, and the redirect must follow the edit either way.
+      const now = getLinkByName(this.db, name);
+      if (now !== undefined) this.byName.set(name, asLink(now));
+    }
   }
 
   delete(name: string): boolean {

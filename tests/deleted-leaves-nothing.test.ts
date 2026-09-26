@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { expect, test } from "vitest";
-import { createLink, deleteLink, getLinkByName, incrementCount } from "../src/db/links.js";
+import { createLink, deleteLink, getLinkByName, incrementCount, setTarget } from "../src/db/links.js";
 import { openDatabase } from "../src/db/open.js";
 import { tempDir } from "./temp-db.js";
 
@@ -80,6 +80,43 @@ test("a delete whose WAL copy cannot be removed says so instead of passing silen
     reader.prepare("SELECT count(*) FROM links").get();
     expect(() => deleteLink(db, canary.name)).toThrow(/old bytes remain/);
     expect(getLinkByName(db, canary.name), "the delete itself still happened").toBeUndefined();
+  } finally {
+    reader.close();
+    db.close();
+  }
+});
+
+// R-028's edit overwrites the target, which ADR-0012 treats like a delete of the old one.
+test("an edited target leaves no copy of the old one in the database files", () => {
+  const dbPath = join(tempDir(), "linkling.db");
+  const db = openDatabase(dbPath);
+  const old = { targetStart: canary.targetStart, targetEnd: canary.targetEnd };
+  const oldFound = (bytes: Buffer) => Object.entries(old).filter(([, v]) => bytes.includes(v)).map(([k]) => k);
+  try {
+    makeCanary(db);
+    expect(oldFound(fileBytes(dbPath)), "blind: the scan cannot see the target before the edit").toEqual(["targetStart", "targetEnd"]);
+
+    expect(setTarget(db, canary.name, "https://example.com/fixed")?.target).toBe("https://example.com/fixed");
+    expect(oldFound(fileBytes(dbPath)), "after the edit, with the database open").toEqual([]);
+    expect(found(fileBytes(dbPath)), "the rest of the link is still there").toEqual(["name", "madeBy", "createdAt", "expiresAt"]);
+  } finally {
+    db.close();
+  }
+  expect(oldFound(fileBytes(dbPath)), "after the edit, with the database closed").toEqual([]);
+});
+
+test("an edit whose WAL copy cannot be removed says so, and setTarget refuses a transaction", () => {
+  const dbPath = join(tempDir(), "linkling.db");
+  const db = openDatabase(dbPath);
+  const reader = new BetterSqlite3(dbPath, { timeout: 0 });
+  db.pragma("busy_timeout = 0");
+  try {
+    makeCanary(db);
+    expect(() => db.transaction(() => setTarget(db, canary.name, "https://example.com/a"))()).toThrow(/inside a transaction/);
+    reader.exec("BEGIN");
+    reader.prepare("SELECT count(*) FROM links").get();
+    expect(() => setTarget(db, canary.name, "https://example.com/b")).toThrow(/old target remains/);
+    expect(getLinkByName(db, canary.name)?.target, "the edit itself still happened").toBe("https://example.com/b");
   } finally {
     reader.close();
     db.close();
