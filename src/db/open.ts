@@ -27,10 +27,15 @@ function enableWal(db: Database): void {
   }
 }
 
-/** Opens the SQLite file at `path` in WAL mode and brings its schema up to date. */
+/**
+ * Opens the SQLite file at `path` in WAL mode and brings its schema up to date. Deleted
+ * content is overwritten with zeros rather than left in freed space (ADR-0012), so a
+ * deleted link is gone from the file and not merely unlisted.
+ */
 export function openDatabase(path: string): Database {
   const db = new BetterSqlite3(path);
   try {
+    db.pragma("secure_delete = ON");
     enableWal(db);
     migrate(db);
   } catch (err) {

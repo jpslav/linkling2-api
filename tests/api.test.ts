@@ -1,4 +1,4 @@
-// The team API under /-/api/ (ADR-0012): making, listing and reading links.
+// The team API under /-/api/ (ADR-0013): making, listing and reading links.
 import { describe, expect, test } from "vitest";
 import { MADE, apiCall, appWith, seed, tempLinks } from "./support/app.js";
 import { TEST_KEY } from "./support/team-key.js";
@@ -38,7 +38,7 @@ describe("R-001 a team member makes a short link under a name they choose", () =
 
   test("made_by keeps the joiners that emoji and Persian spelling need", async () => {
     const app = appWith();
-    for (const madeBy of ["👨‍👩‍👧 team", "دانش‌آموز", "🎉 party"]) {
+    for (const madeBy of ["👨\u200d👩\u200d👧 team", "دانش\u200cآموز", "🎉 party"]) {
       const res = await apiCall(app, "POST", "/-/api/links", { url: "https://example.com/a", made_by: madeBy });
       expect([madeBy, res.statusCode, res.json().made_by]).toEqual([madeBy, 201, madeBy]);
     }
@@ -61,8 +61,8 @@ describe("a body the API cannot use is refused with a 400 and stores nothing", (
     ["made_by too long", { url, made_by: "x".repeat(65) }, "made_by"],
     ["made_by with a line break", { url, made_by: "a\nb" }, "made_by"],
     ["made_by with a C1 control", { url, made_by: "a\u0085b" }, "made_by"],
-    ["made_by with a right-to-left override", { url, made_by: "a‮b" }, "made_by"],
-    ["made_by with a line separator", { url, made_by: "a b" }, "made_by"],
+    ["made_by with a right-to-left override", { url, made_by: "a\u202eb" }, "made_by"],
+    ["made_by with a line separator", { url, made_by: "a\u2028b" }, "made_by"],
     ["expires a word", { url, expires: "tomorrow" }, "expires"],
     ["expires not a real date", { url, expires: "2026-02-30" }, "expires"],
     ["expires a zero lifetime", { url, expires: "0d" }, "expires"],

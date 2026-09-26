@@ -1,4 +1,4 @@
-// What the team API accepts in a request body (ADR-0012), checked by hand rather than by
+// What the team API accepts in a request body (ADR-0013), checked by hand rather than by
 // Fastify's schema: its default Ajv drops unknown fields and coerces types, and a typo like
 // `expiry` should be refused, not silently ignored.
 import { normalizeName } from "./names.js";
@@ -21,7 +21,7 @@ const MAX_MADE_BY = 64;
 // something else: none belongs in a name shown on the stats page or printed by the CLI.
 // Other format characters stay allowed: the zero-width joiner builds emoji sequences, and
 // the zero-width non-joiner is ordinary spelling in Persian.
-const CONTROL = /[\p{Cc}\p{Zl}\p{Zp}؜‎‏‪-‮⁦-⁩]/u;
+const CONTROL = /[\p{Cc}\p{Zl}\p{Zp}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u;
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const LIFETIME = /^([1-9]\d{0,5})([smhd])$/;
 const UNIT_MS = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 } as const;

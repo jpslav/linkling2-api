@@ -11,5 +11,7 @@
 | [0008](0008-third-party-services.md) | No third-party services, in the product or on the public site | Accepted |
 | [0009](0009-redirect-header-allowlist.md) | The redirect's response headers are an allowlist, pinned by a test | Accepted |
 | [0010](0010-migrations-user-version.md) | Migrations are numbered SQL files tracked by PRAGMA user_version, with no migrations table | Accepted |
-| [0012](0012-team-api.md) | The team API under /-/api/: routes, JSON fields and errors | Accepted |
+| [0011](0011-privacy-manifest-contract.md) | The privacy manifest carries the page's wording, and the site's check reads it from a same-named branch on a pull request, else main | Accepted |
+| [0012](0012-deleted-means-gone.md) | Deleted link data is overwritten, not just unlisted: secure_delete is on and the WAL is truncated after a delete | Accepted |
+| [0013](0013-team-api.md) | The team API under /-/api/: routes, JSON fields and errors | Accepted |
 <!-- adr-index:end -->

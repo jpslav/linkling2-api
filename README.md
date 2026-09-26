@@ -43,7 +43,7 @@ apps' link previews do (R-029).
 
 Everything under `/-/` is the service's own; the rest is short names (ADR-0001). Every
 `/-/api/` call needs `Authorization: Bearer $LINKLING_KEY`. The full contract is
-[ADR-0012](docs/adr/0012-team-api.md).
+[ADR-0013](docs/adr/0013-team-api.md).
 
 | Route | Body | Answers |
 |---|---|---|

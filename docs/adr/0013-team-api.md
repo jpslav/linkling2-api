@@ -1,4 +1,4 @@
-# ADR-0012 — The team API under /-/api/: routes, JSON fields and errors
+# ADR-0013 — The team API under /-/api/: routes, JSON fields and errors
 
 - Status: Accepted
 - Approver: claude
