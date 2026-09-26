@@ -41,11 +41,18 @@ sees, so it is Claude's. It keeps an existing promise rather than making a new o
 - Every write zeroes the space it frees, which costs some extra I/O. A delete also costs
   a checkpoint. Deletes are rare, and the whole database is a few tables for one team.
 - A truncating checkpoint cannot finish while another connection is reading an older
-  snapshot. It then reports busy instead of failing, and the WAL copy stays until a later
-  checkpoint. The service is one process on one connection (ADR-0006), and
-  better-sqlite3 is synchronous, so no other reader is open when `deleteLink` runs. A
-  second connection added later would reopen this gap. The byte-scan test uses one
-  connection, so it would not notice.
+  snapshot. It first waits out the busy timeout (5 s by default in better-sqlite3), and
+  then reports busy rather than throwing. The WAL copy then stays until the next
+  truncating checkpoint, the connection closing, or WAL reuse happening to overwrite it.
+  SQLite's own automatic checkpoints are passive and do not truncate. `deleteLink`
+  checks the result and throws when the checkpoint was busy. The delete has still
+  happened, but the caller learns that the old bytes remain.
+  `tests/deleted-leaves-nothing.test.ts` holds a second reader open to pin that. The
+  service is one process on one connection (ADR-0006), and better-sqlite3 is
+  synchronous, so today no other reader is open when `deleteLink` runs.
+- The checkpoint cannot run inside a transaction. SQLite would throw `SQLITE_LOCKED`
+  there and roll the delete back with it. So `deleteLink` refuses to start inside one, and
+  a caller that wraps a delete in a transaction must checkpoint after the commit instead.
 - This does not cover copies outside the service's own files: backups a team takes, or the
   file system's own handling of freed blocks on the disk. The privacy page's scope is the
   service, as ADR-0004 says.
