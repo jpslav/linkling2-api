@@ -9,17 +9,20 @@
 # prints its name. The last line is `DEMO OK` (exit 0), or `DEMO FAILED at step: <the step>`
 # (exit non-zero) for the first step that did not do what it should.
 #
-# Whatever happens, the way out runs `docker compose down -v` on its own project, so no
-# container, network, volume or image of the demo is left, and it checks that none is (a run
-# that got that far but could not clean up after itself fails at the step "tear down").
+# However the run ends (a failed step, Ctrl-C or Ctrl-\, a closed pipe, kill), the way out runs
+# `docker compose down -v` on its own project, so no container, network, volume or image of the
+# demo is left, and it checks that none is (a run that got that far but could not clean up after
+# itself fails at the step "tear down"). kill -9 cannot be caught, and leaves the stack running.
 #
 # Needs Docker with Compose, Node 24.2 or newer, npm, curl, python3, and a network: the image is
-# built (Docker Hub, npm), `npm ci` runs when node_modules/ is missing, and linkling-web is
-# cloned from GitHub (so git too) unless it is found beside this checkout or LINKLING_WEB is set.
-# Apart from that, it writes only this checkout's node_modules/ and dist/, its own temp
-# directory, and Docker's build cache and pulled base image, which stay so the next run is quick.
-# It sends requests only to the stack it starts and to its own static server, and never follows
-# a redirect: LINKLING_BASE and LINKLING_SITE are set here whatever they were in the environment.
+# built (its base image and its apt and npm packages are downloaded), `npm ci` runs when
+# node_modules/ is missing, and linkling-web is cloned from GitHub (so git too) unless it is found
+# beside this checkout or LINKLING_WEB is set.
+# It also writes this checkout's node_modules/ (when that is missing) and dist/, its own temp
+# directory, npm's logs under ~/.npm, and Docker's build cache, which stays.
+# curl and the `linkling` command send requests only to the stack it starts and to its own static
+# server, and neither follows a redirect: LINKLING_BASE and LINKLING_SITE are set here whatever
+# they were in the environment.
 #
 #   LINKLING_KEY      the team key; a random one is made when this is unset
 #   PORT_BASE         the host port for the service (compose.yaml's); a free one when unset
@@ -128,9 +131,9 @@ total_on_stats_page() {
 finish() {
   local rc=$?
   set +e
-  # A second Ctrl-C must not stop this script halfway through the teardown. It can still reach
-  # `docker compose down` itself, which may take it as a request to stop; the checks below then
-  # name what is left, and the run fails.
+  # A second Ctrl-C must not stop this script halfway through the teardown, so these are ignored
+  # from here on. `docker compose down` is sent the signal too; if that stops it, its output is
+  # shown below and the run fails.
   trap '' INT TERM HUP QUIT
   trap - EXIT ERR
   # Only a run that reached its last line succeeded: the bash macOS ships (3.2) reaches this trap
@@ -139,7 +142,8 @@ finish() {
     rc=1
   fi
   if [ "$rc" -ne 0 ] && [ "$STACK_STARTED" = 1 ]; then
-    # The service logs only when it will not start or cannot write its counts (README), so this is often empty.
+    # The service writes a log line only when it will not start, cannot rebuild its database file at
+    # start, or cannot write the day's counts (README.md, "Run it"), so this is often empty.
     local service_log
     service_log=$(dc logs --no-color --tail 20 2>&1)
     if [ -n "$service_log" ]; then
@@ -199,8 +203,7 @@ for tool in docker node npm curl python3; do
 done
 docker info >/dev/null 2>&1 || die "Docker is not running (docker info fails)"
 docker compose version >/dev/null 2>&1 || die "docker compose is not available"
-# package.json's engines says >=24.2, and the command's `import.meta.main` needs it: an older Node
-# runs dist/cli.js and prints nothing.
+# package.json's engines says node >=24.2.
 node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 24 || (major === 24 && minor >= 2) ? 0 : 1)' \
   || die "Node 24.2 or newer is needed (package.json engines), found $(node -v)"
 say "docker $(docker version --format '{{.Server.Version}}'), node $(node -v), npm $(npm -v)"
@@ -243,14 +246,15 @@ if [ -z "${LINKLING_KEY:-}" ]; then
   say "no LINKLING_KEY set: made a random one for this run"
 fi
 export LINKLING_KEY
-# The service's own rule for a key (src/team-key.ts): a key it refuses would crash-loop the
-# container until --wait-timeout runs out.
+# The service's own rule for a key (keyProblem in src/team-key.ts): a key it will not start with
+# (src/server.ts) is refused here, before the image is built, with the same reason.
 key_problem=$(node --input-type=module -e 'import { keyProblem } from "./dist/team-key.js"; console.log(keyProblem(process.env.LINKLING_KEY) ?? "")')
 [ -z "$key_problem" ] || die "LINKLING_KEY $key_problem"
 say "compose project $PROJECT; building the image (the first build takes a minute or two)"
 STACK_STARTED=1
 run_quiet build-image.log dc build || die "docker compose build failed"
-# The port is chosen only now, after the slow part, so it is not held for minutes before it is used.
+# The port is chosen only now, after the build, so the time between choosing it and Docker
+# publishing it is seconds, not the minutes a build can take.
 if [ -z "${PORT_BASE:-}" ]; then
   PORT_BASE=$(free_port)
 fi
