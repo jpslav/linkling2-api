@@ -20,7 +20,7 @@ Each step prints its name. The last line is `DEMO OK` (exit 0), or
 `DEMO FAILED at step: <the step>` and a non-zero exit for the first step that did not do what
 it should (R-027).
 
-It needs Docker with Compose, Node 24, npm, curl, python3 and a network (and git, when it has to
+It needs Docker with Compose, Node 24.2 or newer, npm, curl, python3 and a network (and git, when it has to
 clone the public site). It makes a random team key unless `LINKLING_KEY` is set, picks a free port
 unless `PORT_BASE` is set, and runs the stack as a compose project of its own that it removes on
 the way out with `docker compose down -v`, so it touches no link or count of yours. It sends

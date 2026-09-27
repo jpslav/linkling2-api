@@ -13,7 +13,7 @@
 # container, network, volume or image of the demo is left, and it checks that none is (a run
 # that got that far but could not clean up after itself fails at the step "tear down").
 #
-# Needs Docker with Compose, Node 24 or newer, npm, curl, python3, and a network: the image is
+# Needs Docker with Compose, Node 24.2 or newer, npm, curl, python3, and a network: the image is
 # built (Docker Hub, npm), `npm ci` runs when node_modules/ is missing, and linkling-web is
 # cloned from GitHub (so git too) unless it is found beside this checkout or LINKLING_WEB is set.
 # Apart from that, it writes only this checkout's node_modules/ and dist/, its own temp
@@ -27,26 +27,36 @@
 #                     ../linkling-web when it is there, else a shallow clone of the public repo
 #   DEMO_BREAK_AFTER  text: right after the first step whose name contains it, the stack is
 #                     stopped (`docker compose stop`), so the step after it fails. That is how to
-#                     see the failing arm: DEMO_BREAK_AFTER=follow ./demo.sh. (Naming the last
-#                     step breaks nothing: no step is left to notice.)
+#                     see the failing arm: DEMO_BREAK_AFTER=follow ./demo.sh. Text that stops
+#                     nothing (a typo, or only the last step's name) fails the run.
 set -euo pipefail
 set -o errtrace
+# A reader that goes away (`./demo.sh | head`, or `| tee` and Ctrl-C) must not kill this script
+# with SIGPIPE before it tears the stack down: a write to it fails instead, and that is a failure
+# like any other.
+trap '' PIPE
 
-ROOT=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT"
 
-CURRENT_STEP="start"
+CURRENT_STEP="set up"
+STEPS_RUN=0
 PROJECT="linkling-demo-$$-$RANDOM"
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/linkling-demo.XXXXXX")
+WORK=""
 STACK_STARTED=0
 WEB_PID=""
 BROKEN=0
 LIFETIME=3 # seconds the expiring link lives
 
+# Whatever is in the user's curl config or proxy settings, curl here asks only this machine.
+curl() { command curl -q --noproxy '*' "$@"; }
+export NO_PROXY="127.0.0.1${NO_PROXY:+,$NO_PROXY}" no_proxy="127.0.0.1${no_proxy:+,$no_proxy}"
+
 # Output the demo makes about itself.
 step() {
   break_after_previous_step
   CURRENT_STEP=$1
+  STEPS_RUN=$((STEPS_RUN + 1))
   echo "==> $1"
 }
 say() { echo "  $*"; }
@@ -57,7 +67,7 @@ die() {
 
 # `docker compose stop`, once, right after the step DEMO_BREAK_AFTER names.
 break_after_previous_step() {
-  if [ "$BROKEN" = 0 ] && [ -n "${DEMO_BREAK_AFTER:-}" ]; then
+  if [ "$BROKEN" = 0 ] && [ "$STEPS_RUN" -gt 0 ] && [ -n "${DEMO_BREAK_AFTER:-}" ]; then
     case "$CURRENT_STEP" in
       *"$DEMO_BREAK_AFTER"*)
         BROKEN=1
@@ -112,7 +122,10 @@ total_on_stats_page() {
 finish() {
   local rc=$?
   set +e
-  trap - EXIT INT TERM HUP ERR
+  # A second Ctrl-C must not stop the teardown halfway (children inherit the ignore, so
+  # `docker compose down` finishes too).
+  trap '' INT TERM HUP
+  trap - EXIT ERR
   if [ "$rc" -ne 0 ] && [ "$STACK_STARTED" = 1 ]; then
     # The service logs only when it will not start or cannot write its counts (README), so this is often empty.
     local service_log
@@ -151,7 +164,7 @@ finish() {
       CURRENT_STEP="tear down"
     fi
   fi
-  rm -rf "$WORK"
+  [ -z "$WORK" ] || rm -rf "$WORK"
   if [ "$rc" -eq 0 ]; then
     echo "DEMO OK"
   else
@@ -163,6 +176,9 @@ trap finish EXIT
 trap 'exit 130' INT TERM HUP
 trap 'echo "  command failed (exit $?): $BASH_COMMAND"' ERR
 
+# After the traps, so that a temp directory that cannot be made still ends in DEMO FAILED.
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/linkling-demo.XXXXXX")
+
 echo "Linkling demo: the whole product, from nothing."
 
 step "check the tools"
@@ -171,8 +187,10 @@ for tool in docker node npm curl python3; do
 done
 docker info >/dev/null 2>&1 || die "Docker is not running (docker info fails)"
 docker compose version >/dev/null 2>&1 || die "docker compose is not available"
-node_major=$(node -p 'process.versions.node.split(".")[0]')
-[ "$node_major" -ge 24 ] || die "Node 24 or newer is needed (package.json engines), found $(node -v)"
+# package.json's engines says >=24.2, and the command's `import.meta.main` needs it: an older Node
+# runs dist/cli.js and prints nothing.
+node -e 'const [major, minor] = process.versions.node.split(".").map(Number); process.exit(major > 24 || (major === 24 && minor >= 2) ? 0 : 1)' \
+  || die "Node 24.2 or newer is needed (package.json engines), found $(node -v)"
 say "docker $(docker version --format '{{.Server.Version}}'), node $(node -v), npm $(npm -v)"
 
 step "build the linkling command from this checkout"
@@ -213,15 +231,22 @@ if [ -z "${LINKLING_KEY:-}" ]; then
   say "no LINKLING_KEY set: made a random one for this run"
 fi
 export LINKLING_KEY
+# The service's own rule for a key (src/team-key.ts): a key it refuses would crash-loop the
+# container until --wait-timeout runs out.
+key_problem=$(node --input-type=module -e 'import { keyProblem } from "./dist/team-key.js"; console.log(keyProblem(process.env.LINKLING_KEY) ?? "")')
+[ -z "$key_problem" ] || die "LINKLING_KEY $key_problem"
+say "compose project $PROJECT; building the image (the first build takes a minute or two)"
+STACK_STARTED=1
+run_quiet build-image.log dc build || die "docker compose build failed"
+# The port is chosen only now, after the slow part, so it is not held for minutes before it is used.
 if [ -z "${PORT_BASE:-}" ]; then
   PORT_BASE=$(free_port)
 fi
 export PORT_BASE
 BASE="http://127.0.0.1:$PORT_BASE"
 export LINKLING_BASE=$BASE
-say "compose project $PROJECT, service on $BASE (the first image build takes a minute or two)"
-STACK_STARTED=1
-run_quiet up.log dc up -d --build --wait --wait-timeout 180 || die "docker compose up did not give a healthy service"
+say "starting it on $BASE"
+run_quiet up.log dc up -d --wait --wait-timeout 180 || die "docker compose up did not give a healthy service"
 health=$(curl -s -o /dev/null --max-time 5 -w '%{http_code}' "$BASE/-/health" || true)
 [ "$health" = 200 ] || die "$BASE/-/health answered '$health', not 200"
 say "$BASE/-/health answers 200"
@@ -272,3 +297,10 @@ sleep $((LIFETIME + 1))
 follow "$BASE/demo-flash"
 [ "$STATUS" = 410 ] || die "following $BASE/demo-flash after it expired answered $STATUS, not 410"
 say "GET $BASE/demo-flash  ->  410: the link has stopped working"
+
+# A DEMO_BREAK_AFTER that stopped nothing (a typo, or only the last step) is not a run of the
+# failing arm, and reporting DEMO OK for it would say the stack was broken when it was not.
+if [ -n "${DEMO_BREAK_AFTER:-}" ] && [ "$BROKEN" = 0 ]; then
+  CURRENT_STEP="DEMO_BREAK_AFTER=$DEMO_BREAK_AFTER"
+  die "no step that has another step after it has that text in its name, so nothing was stopped"
+fi
