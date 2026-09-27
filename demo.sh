@@ -47,6 +47,7 @@ WORK=""
 STACK_STARTED=0
 WEB_PID=""
 BROKEN=0
+COMPLETED=0
 LIFETIME=3 # seconds the expiring link lives
 
 # Whatever is in the user's curl config or proxy settings, curl here asks only this machine.
@@ -74,7 +75,10 @@ break_after_previous_step() {
       *"$DEMO_BREAK_AFTER"*)
         BROKEN=1
         echo "  DEMO_BREAK_AFTER=$DEMO_BREAK_AFTER: stopping the stack after the step \"$CURRENT_STEP\""
-        dc stop >/dev/null 2>&1 || die "docker compose stop failed, so the stack was not broken"
+        if ! dc stop >/dev/null 2>&1; then
+          CURRENT_STEP="DEMO_BREAK_AFTER=$DEMO_BREAK_AFTER"
+          die "docker compose stop failed, so the stack was not broken"
+        fi
         ;;
     esac
   fi
@@ -127,8 +131,13 @@ finish() {
   # A second Ctrl-C must not stop this script halfway through the teardown. It can still reach
   # `docker compose down` itself, which may take it as a request to stop; the checks below then
   # name what is left, and the run fails.
-  trap '' INT TERM HUP
+  trap '' INT TERM HUP QUIT
   trap - EXIT ERR
+  # Only a run that reached its last line succeeded: the bash macOS ships (3.2) reaches this trap
+  # with status 0 when `set -u` aborts it on an unset variable.
+  if [ "$rc" -eq 0 ] && [ "$COMPLETED" = 0 ]; then
+    rc=1
+  fi
   if [ "$rc" -ne 0 ] && [ "$STACK_STARTED" = 1 ]; then
     # The service logs only when it will not start or cannot write its counts (README), so this is often empty.
     local service_log
@@ -176,7 +185,7 @@ finish() {
   exit "$rc"
 }
 trap finish EXIT
-trap 'exit 130' INT TERM HUP
+trap 'exit 130' INT TERM HUP QUIT
 trap 'echo "  command failed (exit $?): $BASH_COMMAND"' ERR
 
 # After the traps, so that a temp directory that cannot be made still ends in DEMO FAILED.
@@ -307,3 +316,5 @@ if [ -n "${DEMO_BREAK_AFTER:-}" ] && [ "$BROKEN" = 0 ]; then
   CURRENT_STEP="DEMO_BREAK_AFTER=$DEMO_BREAK_AFTER"
   die "no step that has another step after it has that text in its name, so nothing was stopped"
 fi
+
+COMPLETED=1
