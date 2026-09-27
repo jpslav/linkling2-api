@@ -19,6 +19,7 @@ Choosing any vendor later would reach the owner as `legal`.
 - The public site loads nothing from any other origin: no web fonts, no analytics, no CDN,
   no embedded images. `checks/no-third-party.sh` fails on any off-site `src` or `href` in
   its HTML or CSS.
+⚠️ **Superseded 2026-09-26** — outbound `<a href>` links are allowed; see the program's products/linkling/DECISIONS.md, "May the public site link out to other sites?"
 - CI uses GitHub Actions only, which sees code, never a user.
 
 ## Consequences
