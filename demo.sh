@@ -25,10 +25,12 @@
 #   PORT_BASE         the host port for the service (compose.yaml's); a free one when unset
 #   LINKLING_WEB      a directory holding the public site (index.html, privacy.html); by default
 #                     ../linkling-web when it is there, else a shallow clone of the public repo
-#   DEMO_BREAK_AFTER  text: right after the first step whose name contains it, the stack is
-#                     stopped (`docker compose stop`), so the step after it fails. That is how to
-#                     see the failing arm: DEMO_BREAK_AFTER=follow ./demo.sh. Text that stops
-#                     nothing (a typo, or only the last step's name) fails the run.
+#   DEMO_BREAK_AFTER  text: right after the first step whose name contains it and that finishes with
+#                     the stack up (from "start the stack" on), the stack is stopped (`docker
+#                     compose stop`), so the step after it fails. That is how to see the failing
+#                     arm: DEMO_BREAK_AFTER=follow ./demo.sh. Text that stops nothing (a typo, a
+#                     name found only in the steps before the stack, or only in the last step)
+#                     fails the run.
 set -euo pipefail
 set -o errtrace
 # A reader that goes away (`./demo.sh | head`, or `| tee` and Ctrl-C) must not kill this script
@@ -40,7 +42,6 @@ ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT"
 
 CURRENT_STEP="set up"
-STEPS_RUN=0
 PROJECT="linkling-demo-$$-$RANDOM"
 WORK=""
 STACK_STARTED=0
@@ -56,7 +57,6 @@ export NO_PROXY="127.0.0.1${NO_PROXY:+,$NO_PROXY}" no_proxy="127.0.0.1${no_proxy
 step() {
   break_after_previous_step
   CURRENT_STEP=$1
-  STEPS_RUN=$((STEPS_RUN + 1))
   echo "==> $1"
 }
 say() { echo "  $*"; }
@@ -65,14 +65,16 @@ die() {
   exit 1
 }
 
-# `docker compose stop`, once, right after the step DEMO_BREAK_AFTER names.
+# `docker compose stop`, once, right after the first step that finished with the stack up (a step
+# before it has nothing to stop) and has DEMO_BREAK_AFTER in its name. Called as the next step
+# begins, when CURRENT_STEP is still the one that has just finished.
 break_after_previous_step() {
-  if [ "$BROKEN" = 0 ] && [ "$STEPS_RUN" -gt 0 ] && [ -n "${DEMO_BREAK_AFTER:-}" ]; then
+  if [ "$BROKEN" = 0 ] && [ "$STACK_STARTED" = 1 ] && [ -n "${DEMO_BREAK_AFTER:-}" ]; then
     case "$CURRENT_STEP" in
       *"$DEMO_BREAK_AFTER"*)
         BROKEN=1
         echo "  DEMO_BREAK_AFTER=$DEMO_BREAK_AFTER: stopping the stack after the step \"$CURRENT_STEP\""
-        dc stop >/dev/null 2>&1 || true
+        dc stop >/dev/null 2>&1 || die "docker compose stop failed, so the stack was not broken"
         ;;
     esac
   fi
@@ -122,8 +124,9 @@ total_on_stats_page() {
 finish() {
   local rc=$?
   set +e
-  # A second Ctrl-C must not stop the teardown halfway (children inherit the ignore, so
-  # `docker compose down` finishes too).
+  # A second Ctrl-C must not stop this script halfway through the teardown. It can still reach
+  # `docker compose down` itself, which may take it as a request to stop; the checks below then
+  # name what is left, and the run fails.
   trap '' INT TERM HUP
   trap - EXIT ERR
   if [ "$rc" -ne 0 ] && [ "$STACK_STARTED" = 1 ]; then
