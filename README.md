@@ -7,6 +7,28 @@ that day's count.
 
 Built by the second rehearsal of [auto-program](https://github.com/jpslav/auto-program). Its program repo is private.
 
+## Try it
+
+```bash
+./demo.sh
+```
+
+Walks the whole product through, starting from nothing: it starts the stack, makes a link,
+follows it, shows its count on the stats page and from the `linkling` command, makes a link
+that expires in 3 seconds, follows it, waits, and follows it again to see it answer `410`.
+Each step prints its name. The last line is `DEMO OK` (exit 0), or
+`DEMO FAILED at step: <the step>` and a non-zero exit for the first step that did not do what
+it should (R-027).
+
+It needs Docker with Compose, Node 24, npm, curl, python3 and a network. It makes a random team
+key unless `LINKLING_KEY` is set, picks a free port unless `PORT_BASE` is set, and runs the stack
+as a compose project of its own that it removes on the way out, `docker compose down -v`, so it
+touches no link or count of yours. It builds the `linkling` command into this checkout's `dist/`
+(and runs `npm ci` when there is no `node_modules/`), serves the public site from `../linkling-web`
+(or `LINKLING_WEB`, or a shallow clone of [linkling2-web](https://github.com/jpslav/linkling2-web))
+on a throwaway local port, and sets `LINKLING_SITE` to it. `DEMO_BREAK_AFTER=follow ./demo.sh`
+stops the stack after the first step whose name contains `follow`, to see a failure named.
+
 ## Run it
 
 ```bash
