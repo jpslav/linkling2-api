@@ -20,10 +20,12 @@ Each step prints its name. The last line is `DEMO OK` (exit 0), or
 `DEMO FAILED at step: <the step>` and a non-zero exit for the first step that did not do what
 it should (R-027).
 
-It needs Docker with Compose, Node 24, npm, curl, python3 and a network. It makes a random team
-key unless `LINKLING_KEY` is set, picks a free port unless `PORT_BASE` is set, and runs the stack
-as a compose project of its own that it removes on the way out, `docker compose down -v`, so it
-touches no link or count of yours. It builds the `linkling` command into this checkout's `dist/`
+It needs Docker with Compose, Node 24, npm, curl, python3 and a network (and git, when it has to
+clone the public site). It makes a random team key unless `LINKLING_KEY` is set, picks a free port
+unless `PORT_BASE` is set, and runs the stack as a compose project of its own that it removes on
+the way out with `docker compose down -v`, so it touches no link or count of yours. It sends
+`linkling` only to the stack it started, whatever `LINKLING_BASE` says in your shell. It builds
+the `linkling` command into this checkout's `dist/`
 (and runs `npm ci` when there is no `node_modules/`), serves the public site from `../linkling-web`
 (or `LINKLING_WEB`, or a shallow clone of [linkling2-web](https://github.com/jpslav/linkling2-web))
 on a throwaway local port, and sets `LINKLING_SITE` to it. `DEMO_BREAK_AFTER=follow ./demo.sh`

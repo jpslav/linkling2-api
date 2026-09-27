@@ -10,13 +10,16 @@
 # (exit non-zero) for the first step that did not do what it should.
 #
 # Whatever happens, the way out runs `docker compose down -v` on its own project, so no
-# container, network, volume or image of the demo is left, and checks that none is.
+# container, network, volume or image of the demo is left, and it checks that none is (a run
+# that got that far but could not clean up after itself fails at the step "tear down").
 #
-# Needs Docker with Compose, Node 24 or newer, npm, curl, python3, and a network (the image is
-# built, `npm ci` runs, and linkling-web is cloned unless it is found beside this checkout).
-# It changes nothing outside this checkout's node_modules/ and dist/ and its own temp
-# directory, and it never talks to a service other than the one it starts: LINKLING_BASE and
-# LINKLING_SITE are set here whatever they were in the environment.
+# Needs Docker with Compose, Node 24 or newer, npm, curl, python3, and a network: the image is
+# built (Docker Hub, npm), `npm ci` runs when node_modules/ is missing, and linkling-web is
+# cloned from GitHub (so git too) unless it is found beside this checkout or LINKLING_WEB is set.
+# Apart from that, it writes only this checkout's node_modules/ and dist/, its own temp
+# directory, and Docker's build cache and pulled base image, which stay so the next run is quick.
+# It sends requests only to the stack it starts and to its own static server, and never follows
+# a redirect: LINKLING_BASE and LINKLING_SITE are set here whatever they were in the environment.
 #
 #   LINKLING_KEY      the team key; a random one is made when this is unset
 #   PORT_BASE         the host port for the service (compose.yaml's); a free one when unset
@@ -128,7 +131,12 @@ finish() {
     local torn_down=1
     if dc down -v --rmi local --remove-orphans >"$WORK/down.log" 2>&1; then
       local left
-      left=$(docker ps -a -q --filter "name=$PROJECT"; docker volume ls -q --filter "name=$PROJECT")
+      left=$(
+        docker ps -a -q --filter "name=$PROJECT"
+        docker volume ls -q --filter "name=$PROJECT"
+        docker network ls -q --filter "name=$PROJECT"
+        docker images -q --filter "reference=$PROJECT*"
+      )
       if [ -n "$left" ]; then
         echo "  something of $PROJECT is still there after docker compose down -v"
         torn_down=0
