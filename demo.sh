@@ -88,7 +88,7 @@ cli() { node "$ROOT/dist/cli.js" "$@"; }
 # follow <url>: one request, never followed on; sets STATUS and LOCATION.
 follow() {
   local out
-  out=$(curl -s -o /dev/null --max-time 5 -w '%{http_code} %{redirect_url}' "$1") || die "curl could not get $1"
+  out=$(curl -s -o /dev/null --max-time 5 -w '%{http_code} %{redirect_url}' "$1") || die "curl could not get $1 (curl exit $?)"
   STATUS=${out%% *}
   LOCATION=${out#* }
 }
@@ -96,7 +96,7 @@ follow() {
 # total_on_stats_page <name>: the Total column of the name's row on the stats page.
 total_on_stats_page() {
   local status row total
-  status=$(curl -s --max-time 5 -o "$WORK/stats.html" -w '%{http_code}' -u ":$LINKLING_KEY" "$BASE/-/stats") || die "curl could not get $BASE/-/stats"
+  status=$(curl -s --max-time 5 -o "$WORK/stats.html" -w '%{http_code}' -u ":$LINKLING_KEY" "$BASE/-/stats") || die "curl could not get $BASE/-/stats (curl exit $?)"
   [ "$status" = 200 ] || die "$BASE/-/stats answered $status, not 200"
   row=$(grep "data-name=\"$1\"" "$WORK/stats.html" || true)
   [ -n "$row" ] || die "the stats page has no row for $1"
@@ -111,8 +111,13 @@ finish() {
   set +e
   trap - EXIT INT TERM HUP ERR
   if [ "$rc" -ne 0 ] && [ "$STACK_STARTED" = 1 ]; then
-    echo "  the service's own log, last lines:"
-    dc logs --no-color --tail 20 2>&1 | sed 's/^/    | /'
+    # The service logs only when it will not start or cannot write its counts (README), so this is often empty.
+    local service_log
+    service_log=$(dc logs --no-color --tail 20 2>&1)
+    if [ -n "$service_log" ]; then
+      echo "  the service's own log, last lines:"
+      printf '%s\n' "$service_log" | sed 's/^/    | /'
+    fi
   fi
   if [ -n "$WEB_PID" ]; then
     kill "$WEB_PID" 2>/dev/null
